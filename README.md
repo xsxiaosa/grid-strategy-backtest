@@ -54,12 +54,12 @@ docker compose up -d --no-build
 docker compose up -d --build
 ```
 
-浏览器访问 `http://服务器IP:8765`。Compose 使用 `grid-backtest-data` 卷保存配置、
-行情缓存、回测报告和优化历史；GitHub Actions 会在 `main`、`master` 推送或 `v*` 标签
-推送时自动构建并发布 `ghcr.io/xsxiaosa/grid-strategy-backtest`。
+浏览器访问 `http://服务器IP:8765`。Compose 默认将配置、行情缓存、回测报告和优化历史
+保存到 Compose 文件旁边的 `data/` 文件夹；GitHub Actions 会在 `main`、`master` 推送或
+`v*` 标签推送时自动构建并发布 `ghcr.io/xsxiaosa/grid-strategy-backtest`。
 
 Compose 同时启动 Watchtower，每 5 分钟检查一次 GHCR。镜像更新后会自动拉取新镜像、
-重建 `grid-backtest` 容器并保留数据卷。服务器首次部署私有 GHCR 镜像前先执行：
+重建 `grid-backtest` 容器并保留本地 `data/` 文件夹。服务器首次部署私有 GHCR 镜像前先执行：
 
 ```text
 docker login ghcr.io
@@ -68,7 +68,8 @@ docker compose up -d --no-build
 ```
 
 默认从 `/root/.docker/config.json` 读取 GHCR 登录信息。如果 Docker 使用其他用户登录，
-可以设置 `DOCKER_CONFIG_FILE` 指向对应的 `config.json`。
+可以设置 `DOCKER_CONFIG_FILE` 指向对应的 `config.json`。如果需要将运行数据放到其他位置，
+可以设置 `GRID_BACKTEST_DATA_DIRECTORY` 覆盖默认的 `./data`。
 
 如果 GHCR 镜像属于其他仓库所有者，可以在 PowerShell 中覆盖镜像地址：
 
