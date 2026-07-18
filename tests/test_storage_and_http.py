@@ -1,15 +1,19 @@
 """JSON 存储与独立 HTTP 服务集成测试。"""
 
 import json
+import errno
+import io
 import tempfile
 import threading
 import time
 import unittest
 import urllib.request
+from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 
 from grid_backtest.storage import JsonStorage
-from grid_backtest.web_server import create_server
+from grid_backtest.web_server import create_server, run_server
 
 
 class FixedMarketProvider:
@@ -119,6 +123,32 @@ class HttpServerTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+
+    def test_rejects_second_server_on_same_port(self) -> None:
+        """同一端口已有服务时，第二个 HTTP 服务必须绑定失败。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            first_server = create_server(port=0, data_directory=Path(directory))
+            second_server = None
+            try:
+                occupied_port = first_server.server_address[1]
+                with self.assertRaises(OSError):
+                    second_server = create_server(port=occupied_port, data_directory=Path(directory))
+            finally:
+                # 断言失败或行为回退时也关闭可能被创建的第二个服务，避免污染后续测试。
+                if second_server is not None:
+                    second_server.server_close()
+                first_server.server_close()
+
+    def test_run_server_reports_port_conflict_and_returns_failure(self) -> None:
+        """端口占用时，启动入口必须输出中文提示并返回非零退出码。"""
+
+        error = OSError(errno.EADDRINUSE, "address already in use")
+        error_stream = io.StringIO()
+        with patch("grid_backtest.web_server.create_server", side_effect=error), redirect_stderr(error_stream):
+            result = run_server(port=8765)
+        self.assertEqual(1, result)
+        self.assertIn("端口 8765 已被占用", error_stream.getvalue())
 
     def test_gets_market_indicators_for_valid_symbol(self) -> None:
         """六位证券代码应通过 GET 接口返回 MA60 和 EMA60 等摘要。"""

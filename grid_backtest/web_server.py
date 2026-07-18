@@ -1,8 +1,10 @@
 """只使用 Python 标准库的本机网页与 JSON API 服务。"""
 
 import json
+import errno
 import logging
 import mimetypes
+import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,6 +19,13 @@ from .storage import JsonStorage
 
 WEB_DIRECTORY = get_web_directory()
 DATA_DIRECTORY = get_data_directory()
+
+
+class GridBacktestHTTPServer(ThreadingHTTPServer):
+    """提供严格独占端口语义的网格回测 HTTP 服务。"""
+
+    # ThreadingHTTPServer 默认允许地址复用；Windows 下会导致两个实例同时绑定同一端口。
+    allow_reuse_address = False
 
 
 class GridBacktestRequestHandler(BaseHTTPRequestHandler):
@@ -209,7 +218,7 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
         self._write_json(status, {"code": code, "message": message})
 
 
-def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Path | None = None) -> ThreadingHTTPServer:
+def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Path | None = None) -> GridBacktestHTTPServer:
     """创建已注入 JSON 存储和应用服务的线程化 HTTP 服务器。
 
     Args:
@@ -230,10 +239,11 @@ def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Pat
             "optimization_manager": OptimizationManager(storage),
         },
     )
-    return ThreadingHTTPServer((host, port), handler_class)
+    # 使用禁止地址复用的服务器，确保发布版只能有一个实例占用默认端口。
+    return GridBacktestHTTPServer((host, port), handler_class)
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8765) -> int:
     """启动独立回测服务并在 Ctrl+C 后安全关闭监听端口。
 
     Args:
@@ -241,7 +251,7 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
         port: 浏览器和 API 使用的端口。
 
     Returns:
-        无返回值；停止服务后关闭底层套接字。
+        进程退出码；正常停止返回 0，端口已占用返回 1。
     """
 
     # 后台优化运行在线程与进程池中，统一启用带时间和级别的控制台日志便于观察长任务进度。
@@ -250,7 +260,18 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    server = create_server(host, port)
+    try:
+        server = create_server(host, port)
+    except OSError as error:
+        # Windows 的端口占用错误码为 10048，其他平台通常映射为 errno.EADDRINUSE。
+        is_port_in_use = error.errno == errno.EADDRINUSE or getattr(error, "winerror", None) == 10048
+        if not is_port_in_use:
+            raise
+        print(
+            f"启动失败：端口 {port} 已被占用，请先关闭已运行的网格策略回测，或释放该端口。",
+            file=sys.stderr,
+        )
+        return 1
     print(f"网格策略回测已启动：http://{host}:{port}")
     print(f"JSON 数据目录：{DATA_DIRECTORY.resolve()}")
     try:
@@ -259,3 +280,4 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
         print("\n正在停止网格策略回测服务……")
     finally:
         server.server_close()
+    return 0
