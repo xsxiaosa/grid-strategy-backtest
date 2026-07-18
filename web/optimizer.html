@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="分钟级网格策略四参数分阶段迭代优化工具">
+  <title>网格参数优化</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- 参数优化与普通回测使用相同视觉语言，并通过独立 URL 保持任务入口清晰。 -->
+  <header class="hero optimizer-hero">
+    <div>
+      <p class="eyebrow">ITERATIVE GRID SEARCH</p>
+      <h1>四参数迭代优化</h1>
+      <p class="hero-copy">固定单次金额，分三轮搜索四个信号参数，并列出收益表现最好与最差的各十组结果。</p>
+    </div>
+    <div class="hero-actions">
+      <nav class="page-nav" aria-label="主要页面">
+        <a class="nav-link" href="/index.html">普通回测</a>
+        <a class="nav-link active" href="/optimizer.html" aria-current="page">参数优化</a>
+      </nav>
+      <div class="storage-badge"><span></span>本机 Python 计算</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="optimizer-intro" aria-label="搜索阶段说明">
+      <article class="stage-card"><span>01</span><div><strong>全范围粗搜索</strong><p>每项默认 15 个、最多 25 个等比采样值，并复用兼容的历史优质参数。</p></div></article>
+      <article class="stage-card"><span>02</span><div><strong>5% 邻域搜索</strong><p>围绕收益靠前且参数分散的两端候选继续搜索。</p></div></article>
+      <article class="stage-card"><span>03</span><div><strong>1% 精细搜索</strong><p>按相邻值乘或除 1.01 完成最终细化。</p></div></article>
+    </section>
+
+    <section class="panel optimizer-panel">
+      <div class="section-heading">
+        <div><p class="section-kicker">SEARCH SETTINGS</p><h2>优化范围</h2></div>
+        <span class="heuristic-badge">迭代搜索 · 非严格全局最优</span>
+      </div>
+      <form id="optimizer-form">
+        <!-- 粗采样密度对四维笛卡尔积影响很大，因此同时展示第一轮理论组合数。 -->
+        <div class="sampling-setting">
+          <label for="coarse-value-limit">每项等比粗采样值
+            <input id="coarse-value-limit" type="number" min="2" max="25" step="1" value="15" required>
+          </label>
+          <p>第一轮最多评估 <strong id="coarse-combination-count">50,625</strong> 组；数值越大，覆盖越细、耗时越长。</p>
+        </div>
+        <!-- 四个字段分别录入闭区间，输入名称与后端参数保持稳定对应。 -->
+        <div class="range-grid">
+          <fieldset class="range-group">
+            <legend>上涨触发（%）</legend>
+            <label for="rise-min">最小值<input id="rise-min" type="number" min="0.01" max="100" step="0.01" value="0.5" required></label>
+            <label for="rise-max">最大值<input id="rise-max" type="number" min="0.01" max="100" step="0.01" value="4" required></label>
+          </fieldset>
+          <fieldset class="range-group">
+            <legend>回落卖出（%）</legend>
+            <label for="sell-min">最小值<input id="sell-min" type="number" min="0.01" max="100" step="0.01" value="20" required></label>
+            <label for="sell-max">最大值<input id="sell-max" type="number" min="0.01" max="100" step="0.01" value="70" required></label>
+          </fieldset>
+          <fieldset class="range-group">
+            <legend>下跌触发（%）</legend>
+            <label for="fall-min">最小值<input id="fall-min" type="number" min="0.01" max="100" step="0.01" value="0.5" required></label>
+            <label for="fall-max">最大值<input id="fall-max" type="number" min="0.01" max="100" step="0.01" value="4" required></label>
+          </fieldset>
+          <fieldset class="range-group">
+            <legend>反弹买入（%）</legend>
+            <label for="buy-min">最小值<input id="buy-min" type="number" min="0.01" max="100" step="0.01" value="20" required></label>
+            <label for="buy-max">最大值<input id="buy-max" type="number" min="0.01" max="100" step="0.01" value="70" required></label>
+          </fieldset>
+        </div>
+
+        <details class="fixed-config">
+          <summary>固定回测条件（单次金额不参与搜索）</summary>
+          <p class="muted fixed-config-help">这些条件在一次任务的全部组合中保持不变，默认读取普通回测页最近保存的配置。</p>
+          <div class="form-grid compact-form-grid">
+            <label for="opt-symbol">证券代码<input id="opt-symbol" data-config-field="symbol" inputmode="numeric" maxlength="6" required></label>
+            <label for="opt-days">有效期（自然日）<input id="opt-days" data-config-field="days" type="number" min="1" max="30" step="1" required></label>
+            <label for="opt-lower">监控下限<input id="opt-lower" data-config-field="lower_bound" type="number" min="0.001" step="0.001" required></label>
+            <label for="opt-upper">监控上限<input id="opt-upper" data-config-field="upper_bound" type="number" min="0.001" step="0.001" required></label>
+            <label for="opt-base">基准价<input id="opt-base" data-config-field="base_price" type="number" min="0.001" step="0.001" required></label>
+            <label for="opt-amount">单次金额（元）<input id="opt-amount" data-config-field="order_amount" type="number" min="100" step="100" required></label>
+            <label for="opt-buy-offset">买入委托上浮<input id="opt-buy-offset" data-config-field="buy_price_offset" type="number" min="0" step="0.001" required></label>
+            <label for="opt-sell-offset">卖出委托下调<input id="opt-sell-offset" data-config-field="sell_price_offset" type="number" min="0" step="0.001" required></label>
+            <label for="opt-capital">初始总资金（元）<input id="opt-capital" data-config-field="initial_capital" type="number" min="1000" step="1000" required></label>
+            <label for="opt-position">初始底仓比例（%）<input id="opt-position" data-config-field="initial_position_percent" type="number" min="0" max="100" step="5" required></label>
+            <label for="opt-rate">佣金费率<input id="opt-rate" data-config-field="commission_rate" type="number" min="0" max="0.1" step="0.00001" required></label>
+            <label for="opt-min-commission">单笔最低佣金（元）<input id="opt-min-commission" data-config-field="minimum_commission" type="number" min="0" step="1" required></label>
+            <label for="opt-lot">每手数量<input id="opt-lot" data-config-field="lot_size" type="number" min="1" step="1" required></label>
+          </div>
+        </details>
+
+        <div class="form-footer">
+          <p>通常评估数万组；运行期间可离开本页，但服务停止会中断未完成任务。</p>
+          <div class="optimizer-actions">
+            <button id="cancel-button" class="button danger-button" type="button" hidden>取消任务</button>
+            <button id="start-button" class="button primary" type="submit">开始三轮优化</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <div id="optimizer-message" role="status" aria-live="polite"></div>
+
+    <section id="progress-panel" class="panel progress-panel" hidden aria-labelledby="progress-title">
+      <div class="progress-heading">
+        <div><p class="section-kicker">LIVE PROGRESS</p><h2 id="progress-title">正在准备</h2></div>
+        <strong id="progress-percent">0%</strong>
+      </div>
+      <div class="progress-track" role="progressbar" aria-label="优化计算进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progress-fill"></span></div>
+      <div class="progress-stats">
+        <span>已评估 <strong id="progress-count">0 / 0</strong></span>
+        <span>已用时 <strong id="progress-time">0.00 秒</strong></span>
+        <span>任务编号 <strong id="progress-id">—</strong></span>
+      </div>
+    </section>
+
+    <section id="optimization-results" class="optimization-results" hidden>
+      <article class="panel result-panel">
+        <div class="section-heading"><div><p class="section-kicker">TOP 10</p><h2>最优 10 组</h2></div><span class="result-label best-label">高收益优先</span></div>
+        <div id="best-table" class="table-wrap"></div>
+      </article>
+      <article class="panel result-panel">
+        <div class="section-heading"><div><p class="section-kicker worst-kicker">BOTTOM 10</p><h2>最差 10 组</h2></div><span class="result-label worst-label">低收益优先</span></div>
+        <div id="worst-table" class="table-wrap"></div>
+      </article>
+    </section>
+  </main>
+
+  <footer>迭代结果不保证数学上的全局最优 · 非交易所官方行情 · 不构成投资建议</footer>
+  <script src="/optimizer.js" defer></script>
+</body>
+</html>

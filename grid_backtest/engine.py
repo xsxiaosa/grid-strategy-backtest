@@ -20,6 +20,9 @@ class SimulationState:
     commissions: float = 0.0
     skipped_for_funds: int = 0
     skipped_for_shares: int = 0
+    buy_count: int = 0
+    sell_count: int = 0
+    record_trade_details: bool = True
 
 
 class GridBacktestEngine:
@@ -117,9 +120,9 @@ class GridBacktestEngine:
                 "profit": self._round_money(grid_profit),
                 "return_percent": self._round_percent(grid_return),
                 "commission": self._round_money(state.commissions),
-                "trade_count": len(state.trades),
-                "buy_count": sum(trade["side"] == "BUY" for trade in state.trades),
-                "sell_count": sum(trade["side"] == "SELL" for trade in state.trades),
+                "trade_count": state.buy_count + state.sell_count,
+                "buy_count": state.buy_count,
+                "sell_count": state.sell_count,
                 "max_drawdown_percent": self._round_percent(grid_max_drawdown),
             },
             "buy_and_hold": {
@@ -145,6 +148,77 @@ class GridBacktestEngine:
                 "网格和直接持有使用完全相同的初始现金与底仓，直接持有组合不再交易。",
                 "默认按 ETF 规则不计印花税；佣金取成交金额乘费率与单笔最低佣金中的较高值。",
             ],
+        }
+
+    def run_summary(self, config: StrategyConfig, market: dict[str, Any]) -> dict[str, float | int]:
+        """使用正式成交规则执行不生成图表和逐笔明细的轻量回测。
+
+        该方法专门服务于参数优化。它与 :meth:`run` 共用信号判断、成交价格、
+        整手数量、资金限制和佣金计算，仅省略体积较大的图表点与成交明细，从而
+        在大量参数组合下显著降低对象创建和进程间传输开销。
+
+        Args:
+            config: 已完成校验且包含本次候选参数的策略配置。
+            market: 包含按时间排序前原始分钟 K 线的行情对象。
+
+        Returns:
+            包含最终资产、收益、超额收益、最大回撤、成交统计和佣金的轻量摘要。
+
+        Raises:
+            ValueError: 有效分钟 K 线不足两根时抛出。
+        """
+
+        bars = sorted(market.get("bars") or [], key=lambda item: str(item.get("timestamp", "")))
+        if len(bars) < 2:
+            raise ValueError("可用分钟 K 线不足，无法进行回测")
+
+        first_price = float(bars[0]["close"])
+        last_price = float(bars[-1]["close"])
+        target_position_value = config.initial_capital * config.initial_position_percent / 100
+        initial_shares = self._floor_to_lot(target_position_value / first_price, config.lot_size)
+        initial_cash = config.initial_capital - initial_shares * first_price
+        initial_assets = initial_cash + initial_shares * first_price
+        state = SimulationState(
+            config.base_price,
+            initial_cash,
+            initial_shares,
+            initial_assets,
+            record_trade_details=False,
+        )
+        grid_peak_assets = initial_assets
+        grid_max_drawdown = 0.0
+
+        for bar in bars:
+            self._process_bar(config, state, bar)
+            grid_assets = state.cash + state.shares * float(bar["close"])
+            grid_peak_assets = max(grid_peak_assets, grid_assets)
+            grid_max_drawdown = max(
+                grid_max_drawdown,
+                self._percentage_drop(grid_peak_assets, grid_assets),
+            )
+
+        grid_final_assets = state.cash + state.shares * last_price
+        hold_final_assets = initial_cash + initial_shares * last_price
+        grid_profit = grid_final_assets - initial_assets
+        hold_profit = hold_final_assets - initial_assets
+        grid_return = grid_profit / initial_assets * 100
+        hold_return = hold_profit / initial_assets * 100
+        return {
+            # 排名使用未舍入值，展示层再按普通报告口径格式化。
+            "final_assets_raw": grid_final_assets,
+            "return_percent_raw": grid_return,
+            "max_drawdown_percent_raw": grid_max_drawdown,
+            "final_assets": self._round_money(grid_final_assets),
+            "profit": self._round_money(grid_profit),
+            "return_percent": self._round_percent(grid_return),
+            "excess_return_percent": self._round_percent(grid_return - hold_return),
+            "max_drawdown_percent": self._round_percent(grid_max_drawdown),
+            "commission": self._round_money(state.commissions),
+            "trade_count": state.buy_count + state.sell_count,
+            "buy_count": state.buy_count,
+            "sell_count": state.sell_count,
+            "skipped_for_funds": state.skipped_for_funds,
+            "skipped_for_shares": state.skipped_for_shares,
         }
 
     def _process_bar(self, config: StrategyConfig, state: SimulationState, bar: dict[str, Any]) -> None:
@@ -217,9 +291,11 @@ class GridBacktestEngine:
         if side == "BUY":
             state.cash -= gross_amount + commission
             state.shares += quantity
+            state.buy_count += 1
         else:
             state.cash += gross_amount - commission
             state.shares -= quantity
+            state.sell_count += 1
         state.commissions += commission
         state.reference_price = price
         state.armed_rise_peak = None
@@ -227,6 +303,8 @@ class GridBacktestEngine:
         position_value_after = state.shares * price
         total_assets_after = state.cash + position_value_after
         profit_after = total_assets_after - state.initial_assets
+        if not state.record_trade_details:
+            return
         state.trades.append({
             "timestamp": bar["timestamp"],
             "side": side,

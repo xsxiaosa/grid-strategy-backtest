@@ -15,7 +15,13 @@
       <h1>网格策略回测</h1>
       <p class="hero-copy">自动提取最近 30 天分钟行情，对比网格交易与相同初始底仓直接持有。</p>
     </div>
-    <div class="storage-badge"><span></span>JSON 存储 · 无数据库</div>
+    <div class="hero-actions">
+      <nav class="page-nav" aria-label="主要页面">
+        <a class="nav-link active" href="/index.html" aria-current="page">普通回测</a>
+        <a class="nav-link" href="/optimizer.html">参数优化</a>
+      </nav>
+      <div class="storage-badge"><span></span>JSON 存储 · 无数据库</div>
+    </div>
   </header>
 
   <main>
@@ -89,7 +95,11 @@
         <section class="panel strategy-panel">
       <div class="section-heading">
         <div><p class="section-kicker">STRATEGY</p><h2>策略方案</h2></div>
-        <button id="reset-button" class="button secondary" type="button">恢复指定方案</button>
+        <div class="section-actions" aria-label="参数操作">
+          <button id="copy-json-button" class="button secondary" type="button">复制参数 JSON</button>
+          <button id="restore-json-button" class="button secondary" type="button">从 JSON 还原</button>
+          <button id="reset-button" class="button secondary" type="button">恢复指定方案</button>
+        </div>
       </div>
       <form id="strategy-form">
         <div class="form-grid">
@@ -117,6 +127,23 @@
           <button id="run-button" class="button primary" type="submit">提取行情并开始回测</button>
         </div>
       </form>
+      <!-- 参数还原使用原生对话框，支持键盘焦点管理和 Esc 取消操作。 -->
+      <dialog id="json-dialog" aria-labelledby="json-dialog-title">
+        <form class="json-dialog-form" method="dialog">
+          <div>
+            <p class="section-kicker">IMPORT JSON</p>
+            <h2 id="json-dialog-title">从 JSON 还原参数</h2>
+            <p class="json-dialog-help">粘贴由“复制参数 JSON”生成的内容。成功后仅更新表单，不会自动开始回测。</p>
+          </div>
+          <label for="json-input">参数 JSON</label>
+          <textarea id="json-input" rows="14" spellcheck="false" placeholder="{&#10;  &quot;symbol&quot;: &quot;588000&quot;,&#10;  &quot;days&quot;: 30&#10;}"></textarea>
+          <p id="json-dialog-error" class="json-dialog-error" role="alert" hidden></p>
+          <div class="json-dialog-actions">
+            <button class="button secondary" type="submit" value="cancel">取消</button>
+            <button id="confirm-restore-button" class="button primary" type="button">还原到表单</button>
+          </div>
+        </form>
+      </dialog>
         </section>
 
         <div id="message" role="status" aria-live="polite"></div>

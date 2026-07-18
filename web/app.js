@@ -4,6 +4,12 @@
 const form = document.querySelector("#strategy-form");
 const runButton = document.querySelector("#run-button");
 const resetButton = document.querySelector("#reset-button");
+const copyJsonButton = document.querySelector("#copy-json-button");
+const restoreJsonButton = document.querySelector("#restore-json-button");
+const jsonDialog = document.querySelector("#json-dialog");
+const jsonInput = document.querySelector("#json-input");
+const jsonDialogError = document.querySelector("#json-dialog-error");
+const confirmRestoreButton = document.querySelector("#confirm-restore-button");
 const message = document.querySelector("#message");
 const reportContainer = document.querySelector("#report");
 const historyContainer = document.querySelector("#history");
@@ -56,6 +62,95 @@ function readForm() {
     if (name !== "symbol") values[name] = Number(values[name]);
   });
   return values;
+}
+
+/**
+ * 将文本写入系统剪贴板，并在浏览器剪贴板接口不可用时使用兼容方案。
+ *
+ * @param {string} text 需要写入剪贴板的完整文本。
+ * @returns {Promise<void>} 文本成功写入剪贴板后结束。
+ * @throws {Error} 浏览器拒绝剪贴板权限且兼容复制也失败时抛出。
+ */
+async function writeClipboardText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  // 本地非安全上下文使用临时文本域兼容旧浏览器，操作完成后立即移除。
+  const temporaryInput = document.createElement("textarea");
+  temporaryInput.value = text;
+  temporaryInput.setAttribute("readonly", "");
+  temporaryInput.style.position = "fixed";
+  temporaryInput.style.opacity = "0";
+  document.body.append(temporaryInput);
+  temporaryInput.select();
+  const copied = document.execCommand("copy");
+  temporaryInput.remove();
+  if (!copied) throw new Error("浏览器未授予剪贴板写入权限");
+}
+
+/**
+ * 校验当前表单后，将全部回测参数格式化为 JSON 并写入剪贴板。
+ *
+ * @returns {Promise<void>} 复制完成并向用户显示结果后结束。
+ */
+async function copyParametersAsJson() {
+  if (!form.reportValidity()) return;
+  copyJsonButton.disabled = true;
+  try {
+    const text = JSON.stringify(readForm(), null, 2);
+    await writeClipboardText(text);
+    showMessage("全部回测参数已复制为 JSON。", "normal");
+  } catch (error) {
+    showMessage(`参数 JSON 复制失败：${error.message}`, "error");
+  } finally {
+    copyJsonButton.disabled = false;
+  }
+}
+
+/**
+ * 打开 JSON 还原对话框，并清理上一次输入和错误状态。
+ *
+ * @returns {void}
+ */
+function openJsonRestoreDialog() {
+  jsonInput.value = "";
+  jsonDialogError.textContent = "";
+  jsonDialogError.hidden = true;
+  jsonDialog.showModal();
+  jsonInput.focus();
+}
+
+/**
+ * 解析用户粘贴的 JSON，将已识别参数还原到表单并校验字段约束。
+ *
+ * @returns {void}
+ */
+function restoreParametersFromJson() {
+  const previousConfig = readForm();
+  try {
+    const parsed = JSON.parse(jsonInput.value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("JSON 顶层必须是参数对象");
+    }
+    const supportedNames = new Set(Array.from(form.elements).map((control) => control.name).filter(Boolean));
+    const recognizedConfig = Object.fromEntries(Object.entries(parsed).filter(([name]) => supportedNames.has(name)));
+    if (Object.keys(recognizedConfig).length === 0) {
+      throw new Error("JSON 中没有可识别的回测参数");
+    }
+    fillForm(recognizedConfig);
+    if (!form.checkValidity()) {
+      fillForm(previousConfig);
+      throw new Error("JSON 中的参数不符合表单范围，请检查代码、天数和数值边界");
+    }
+    jsonDialog.close();
+    showMessage(`已从 JSON 还原 ${Object.keys(recognizedConfig).length} 个参数，请确认后开始回测。`, "normal");
+  } catch (error) {
+    jsonDialogError.textContent = `还原失败：${error.message}`;
+    jsonDialogError.hidden = false;
+    jsonInput.focus();
+  }
 }
 
 /**
@@ -772,12 +867,26 @@ function createHistoryItem(item) {
  * @returns {Promise<void>} 页面初始化完成后结束。
  */
 async function initialize() {
-  try { fillForm(await requestJson("/api/config")); }
+  try {
+    const savedConfig = await requestJson("/api/config");
+    // 优化页通过会话存储传递一组完整配置；读取后立即清除，避免以后刷新重复覆盖。
+    const pendingText = sessionStorage.getItem("grid-backtest-pending-config");
+    if (pendingText) {
+      sessionStorage.removeItem("grid-backtest-pending-config");
+      fillForm({ ...savedConfig, ...JSON.parse(pendingText) });
+      showMessage("已载入参数优化结果，可以直接开始详细回测。", "normal");
+    } else {
+      fillForm(savedConfig);
+    }
+  }
   catch (error) { fillForm(DEFAULT_CONFIG); showMessage(`配置读取失败，已使用指定方案：${error.message}`, "error"); }
   await loadHistory();
 }
 
 resetButton.addEventListener("click", () => fillForm(DEFAULT_CONFIG));
+copyJsonButton.addEventListener("click", () => void copyParametersAsJson());
+restoreJsonButton.addEventListener("click", openJsonRestoreDialog);
+confirmRestoreButton.addEventListener("click", restoreParametersFromJson);
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   runButton.disabled = true;

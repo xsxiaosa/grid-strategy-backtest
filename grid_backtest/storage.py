@@ -19,8 +19,10 @@ class JsonStorage:
         self.data_directory = data_directory.resolve()
         self.market_directory = self.data_directory / "market"
         self.report_directory = self.data_directory / "reports"
+        self.optimization_directory = self.data_directory / "optimizations"
         self.market_directory.mkdir(parents=True, exist_ok=True)
         self.report_directory.mkdir(parents=True, exist_ok=True)
+        self.optimization_directory.mkdir(parents=True, exist_ok=True)
 
     def read_config(self) -> dict[str, Any] | None:
         """读取最近一次保存的策略配置。
@@ -137,6 +139,53 @@ class JsonStorage:
                 "winner": report.get("comparison", {}).get("winner"),
             })
         return summaries
+
+    def write_optimization(self, job_id: str, value: dict[str, Any]) -> Path:
+        """原子保存完成的四参数优化任务摘要。
+
+        Args:
+            job_id: 仅由服务端生成的安全优化任务编号。
+            value: 包含任务条件、统计和两端各十组结果的 JSON 对象。
+
+        Returns:
+            已成功写入的优化 JSON 绝对路径。
+        """
+
+        path = self.optimization_directory / f"{job_id}.json"
+        self._write_json(path, value)
+        return path.resolve()
+
+    def read_optimization(self, job_id: str) -> dict[str, Any] | None:
+        """按安全任务编号读取已持久化的优化结果。
+
+        Args:
+            job_id: 只允许字母、数字、连字符和下划线的任务编号。
+
+        Returns:
+            已解析的优化结果；编号非法或文件不存在时返回 ``None``。
+        """
+
+        if not job_id or any(not (character.isalnum() or character in "-_") for character in job_id):
+            return None
+        return self._read_json(self.optimization_directory / f"{job_id}.json")
+
+    def list_optimizations(self, limit: int = 10) -> list[dict[str, Any]]:
+        """读取最近完成的优化结果供后续扩大范围时复用候选。
+
+        Args:
+            limit: 最多读取的历史优化文件数量，限制在 1 至 50 之间。
+
+        Returns:
+            按文件名倒序排列且能够正常解析的优化结果列表。
+        """
+
+        results: list[dict[str, Any]] = []
+        paths = sorted(self.optimization_directory.glob("*.json"), reverse=True)
+        for path in paths[: max(1, min(limit, 50))]:
+            result = self._read_json(path)
+            if result:
+                results.append(result)
+        return results
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any] | None:

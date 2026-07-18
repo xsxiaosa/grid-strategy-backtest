@@ -3,6 +3,7 @@
 import json
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
 from pathlib import Path
@@ -63,9 +64,58 @@ class HttpServerTests(unittest.TestCase):
                     homepage = response.read().decode("utf-8")
                 with urllib.request.urlopen(base_url + "/api/config", timeout=5) as response:
                     config = json.load(response)
+                with urllib.request.urlopen(base_url + "/optimizer.html", timeout=5) as response:
+                    optimizer_page = response.read().decode("utf-8")
                 self.assertIn("网格策略回测", homepage)
+                self.assertIn("四参数迭代优化", optimizer_page)
                 self.assertEqual("588000", config["symbol"])
                 self.assertEqual(30, config["days"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_runs_small_optimization_and_persists_json(self) -> None:
+        """单值范围优化应通过后台 API 完成并写入 optimizations JSON。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_directory = Path(directory)
+            server = create_server(port=0, data_directory=data_directory)
+            server.RequestHandlerClass.optimization_manager.market_provider = FixedMarketProvider()
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base_url = f"http://127.0.0.1:{server.server_address[1]}"
+                parameter_names = (
+                    "rise_trigger_percent",
+                    "sell_pullback_percent",
+                    "fall_trigger_percent",
+                    "buy_rebound_percent",
+                )
+                payload = {
+                    "config": {},
+                    "ranges": {name: {"minimum": 1, "maximum": 1} for name in parameter_names},
+                    "coarse_value_limit": 25,
+                }
+                request = urllib.request.Request(
+                    base_url + "/api/optimizations",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    created = json.load(response)
+                deadline = time.monotonic() + 15
+                snapshot = created
+                while snapshot["status"] in {"queued", "running"} and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                    with urllib.request.urlopen(base_url + f"/api/optimizations/{created['job_id']}", timeout=5) as response:
+                        snapshot = json.load(response)
+                self.assertEqual("completed", snapshot["status"], snapshot.get("error"))
+                self.assertEqual(25, snapshot["coarse_value_limit"])
+                self.assertEqual(1, snapshot["completed"])
+                self.assertEqual(1, len(snapshot["best"]))
+                self.assertTrue(list((data_directory / "optimizations").glob("*.json")))
             finally:
                 server.shutdown()
                 server.server_close()

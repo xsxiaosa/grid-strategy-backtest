@@ -1,6 +1,7 @@
 """只使用 Python 标准库的本机网页与 JSON API 服务。"""
 
 import json
+import logging
 import mimetypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -8,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .optimization import OptimizationManager
 from .service import BacktestService
 from .storage import JsonStorage
 
@@ -20,6 +22,7 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
     """处理静态网页、策略配置和回测报告 JSON 请求。"""
 
     service: BacktestService
+    optimization_manager: OptimizationManager
 
     def do_GET(self) -> None:
         """处理首页、静态资源、配置和历史报告读取请求。
@@ -43,6 +46,14 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._write_json(HTTPStatus.OK, report)
             return
+        if path.startswith("/api/optimizations/"):
+            job_id = path.removeprefix("/api/optimizations/")
+            snapshot = self.optimization_manager.get(job_id)
+            if snapshot is None:
+                self._write_error(HTTPStatus.NOT_FOUND, "OPTIMIZATION_NOT_FOUND", "参数优化任务不存在")
+            else:
+                self._write_json(HTTPStatus.OK, snapshot)
+            return
         self._serve_static(path)
 
     def do_POST(self) -> None:
@@ -52,7 +63,8 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
             无返回值；成功返回完整报告，失败返回结构化错误。
         """
 
-        if urlparse(self.path).path != "/api/backtests":
+        path = urlparse(self.path).path
+        if path not in {"/api/backtests", "/api/optimizations"}:
             self._write_error(HTTPStatus.NOT_FOUND, "NOT_FOUND", "接口不存在")
             return
         try:
@@ -63,26 +75,56 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
             body = json.loads(raw_body.decode("utf-8"))
             if not isinstance(body, dict):
                 raise ValueError("请求 JSON 根节点必须是对象")
-            report = self.service.run(body)
-            self._write_json(HTTPStatus.OK, report)
+            if path == "/api/optimizations":
+                snapshot = self.optimization_manager.start(body)
+                self._write_json(HTTPStatus.ACCEPTED, snapshot)
+            else:
+                report = self.service.run(body)
+                self._write_json(HTTPStatus.OK, report)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             self._write_error(HTTPStatus.BAD_REQUEST, "INVALID_REQUEST", str(error))
         except RuntimeError as error:
-            self._write_error(HTTPStatus.BAD_GATEWAY, "MARKET_DATA_UNAVAILABLE", str(error))
+            if path == "/api/optimizations":
+                self._write_error(HTTPStatus.CONFLICT, "OPTIMIZATION_BUSY", str(error))
+            else:
+                self._write_error(HTTPStatus.BAD_GATEWAY, "MARKET_DATA_UNAVAILABLE", str(error))
         except OSError as error:
             self._write_error(HTTPStatus.INTERNAL_SERVER_ERROR, "JSON_STORAGE_ERROR", str(error))
 
+    def do_DELETE(self) -> None:
+        """处理运行中优化任务的取消请求。
+
+        Returns:
+            无返回值；成功时返回最新任务状态，不存在时返回结构化 404。
+        """
+
+        path = urlparse(self.path).path
+        if not path.startswith("/api/optimizations/"):
+            self._write_error(HTTPStatus.NOT_FOUND, "NOT_FOUND", "接口不存在")
+            return
+        job_id = path.removeprefix("/api/optimizations/")
+        snapshot = self.optimization_manager.cancel(job_id)
+        if snapshot is None:
+            self._write_error(HTTPStatus.NOT_FOUND, "OPTIMIZATION_NOT_FOUND", "参数优化任务不存在")
+        else:
+            self._write_json(HTTPStatus.OK, snapshot)
+
     def log_message(self, format_string: str, *args: Any) -> None:
-        """以中文项目前缀输出标准访问日志。
+        """以中文项目前缀输出访问日志，并过滤高频成功进度轮询。
 
         Args:
             format_string: BaseHTTPRequestHandler 提供的日志格式。
             args: 格式化日志所需参数。
 
         Returns:
-            无返回值；日志写入标准错误流。
+            无返回值；普通访问日志写入标准错误流，成功的优化进度轮询不重复输出。
         """
 
+        # 前端每 750 毫秒查询一次状态；成功轮询没有诊断价值，会淹没真正的后台计算进度。
+        path = urlparse(self.path).path
+        status_code = str(args[1]) if len(args) > 1 else ""
+        if self.command == "GET" and path.startswith("/api/optimizations/") and status_code == "200":
+            return
         super().log_message("[网格回测] " + format_string, *args)
 
     def _serve_static(self, path: str) -> None:
@@ -95,7 +137,14 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
             无返回值；文件内容或 404 错误直接写入响应。
         """
 
-        static_files = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/styles.css": "styles.css"}
+        static_files = {
+            "/": "index.html",
+            "/index.html": "index.html",
+            "/app.js": "app.js",
+            "/styles.css": "styles.css",
+            "/optimizer.html": "optimizer.html",
+            "/optimizer.js": "optimizer.js",
+        }
         filename = static_files.get(path)
         if filename is None:
             self._write_error(HTTPStatus.NOT_FOUND, "NOT_FOUND", "页面不存在")
@@ -157,7 +206,14 @@ def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Pat
     """
 
     storage = JsonStorage(data_directory or PROJECT_DIRECTORY / "data")
-    handler_class = type("ConfiguredGridBacktestRequestHandler", (GridBacktestRequestHandler,), {"service": BacktestService(storage)})
+    handler_class = type(
+        "ConfiguredGridBacktestRequestHandler",
+        (GridBacktestRequestHandler,),
+        {
+            "service": BacktestService(storage),
+            "optimization_manager": OptimizationManager(storage),
+        },
+    )
     return ThreadingHTTPServer((host, port), handler_class)
 
 
@@ -172,6 +228,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
         无返回值；停止服务后关闭底层套接字。
     """
 
+    # 后台优化运行在线程与进程池中，统一启用带时间和级别的控制台日志便于观察长任务进度。
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     server = create_server(host, port)
     print(f"网格策略回测已启动：http://{host}:{port}")
     print(f"JSON 数据目录：{(PROJECT_DIRECTORY / 'data').resolve()}")
