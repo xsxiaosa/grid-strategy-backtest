@@ -1,0 +1,18 @@
+# Python 解释器、测试工具和本地虚拟环境生成的文件。
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmppytest-*/
+.venv/
+venv/
+
+# 回测运行时生成的配置、行情缓存、报告和参数优化结果。
+data/
+
+# 项目不使用 npm；该空锁文件属于本地工具生成物。
+package-lock.json
+
+# 本地日志和操作系统临时文件。
+*.log
+.DS_Store
+Thumbs.db

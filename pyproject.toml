@@ -1,0 +1,7 @@
+[project]
+# 项目只依赖 Python 标准库，声明文件用于固定最低 Python 版本和项目元信息。
+name = "grid-strategy-backtest"
+version = "1.0.0"
+description = "分钟级网格策略 JSON 回测工具"
+requires-python = ">=3.11"
+

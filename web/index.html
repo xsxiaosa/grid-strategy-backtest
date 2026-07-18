@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="588000 分钟级网格策略独立回测工具">
+  <title>网格策略回测</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- 页面只负责参数录入和报告展示，所有策略计算均由本机 Python 服务完成。 -->
+  <header class="hero">
+    <div>
+      <p class="eyebrow">MINUTE GRID LAB</p>
+      <h1>网格策略回测</h1>
+      <p class="hero-copy">自动提取最近 30 天分钟行情，对比网格交易与相同初始底仓直接持有。</p>
+    </div>
+    <div class="storage-badge"><span></span>JSON 存储 · 无数据库</div>
+  </header>
+
+  <main>
+    <div class="workspace-layout">
+      <!-- 参数说明栏使用原生 details 支持键盘操作和按组折叠，参数名称可直接定位到对应输入框。 -->
+      <aside class="panel parameter-guide" aria-labelledby="parameter-guide-title">
+        <p class="section-kicker">PARAMETER GUIDE</p>
+        <h2 id="parameter-guide-title">参数作用说明</h2>
+        <p class="parameter-guide-intro">所有百分比都直接填写百分数，例如 <code>2.5</code> 表示 2.5%。点击参数名可定位到对应输入框。</p>
+
+        <details class="guide-group" open>
+          <summary>行情与价格范围</summary>
+          <dl>
+            <dt><a href="#symbol-input">证券代码</a></dt>
+            <dd>需要回测的六位证券代码，用于获取对应的分钟行情。</dd>
+            <dt><a href="#days-input">有效期</a></dt>
+            <dd>向前获取和回测的自然日数量，当前分钟行情接口最多支持 30 天。</dd>
+            <dt><a href="#lower-bound-input">监控下限</a></dt>
+            <dd>收盘价低于该价格时，本分钟不更新峰值、谷值，也不触发交易。</dd>
+            <dt><a href="#upper-bound-input">监控上限</a></dt>
+            <dd>收盘价高于该价格时，本分钟同样被策略忽略，用于限制策略工作区间。</dd>
+            <dt><a href="#base-price-input">基准价</a></dt>
+            <dd>第一轮网格的参考价格。每次成功成交后，基准价自动更新为该笔实际成交价。</dd>
+          </dl>
+        </details>
+
+        <details class="guide-group" open>
+          <summary>信号触发与确认</summary>
+          <dl>
+            <dt><a href="#rise-trigger-input">上涨触发</a></dt>
+            <dd>收盘价相对当前基准价上涨达到该比例后，开始记录上涨峰值并等待回落。</dd>
+            <dt><a href="#sell-pullback-input">回落卖出</a></dt>
+            <dd>价格从上涨峰值向基准价方向回撤指定比例时确认卖出。该比例针对“基准价到峰值的涨幅”，不是价格本身下跌相同比例。</dd>
+            <dt><a href="#fall-trigger-input">下跌触发</a></dt>
+            <dd>收盘价相对当前基准价下跌达到该比例后，开始记录下跌谷值并等待反弹。</dd>
+            <dt><a href="#buy-rebound-input">反弹买入</a></dt>
+            <dd>价格从下跌谷值向基准价方向收复指定比例时确认买入。该比例针对“谷值到基准价的跌幅”。</dd>
+          </dl>
+        </details>
+
+        <details class="guide-group" open>
+          <summary>每笔成交规则</summary>
+          <dl>
+            <dt><a href="#order-amount-input">单次金额</a></dt>
+            <dd><strong>每次网格信号计划使用的证券金额。</strong>程序按“单次金额 ÷ 模拟成交价”计算股数，再按照每手数量向下取整。因此它不是固定股数，实际成交额通常不超过填写值；买入还受现金限制，卖出还受当前持仓限制。</dd>
+            <dt><a href="#buy-offset-input">买入委托上浮</a></dt>
+            <dd>模拟买入价等于本分钟收盘价加上该数值，并限制在该分钟最高价以内，用于近似卖一价成交。</dd>
+            <dt><a href="#sell-offset-input">卖出委托下调</a></dt>
+            <dd>模拟卖出价等于本分钟收盘价减去该数值，并限制在该分钟最低价以上，用于近似买一价成交。</dd>
+            <dt><a href="#lot-size-input">每手数量</a></dt>
+            <dd>允许成交的最小股数单位。计算出的交易股数会向下取整为该数值的整数倍。</dd>
+          </dl>
+        </details>
+
+        <details class="guide-group" open>
+          <summary>初始资产与费用</summary>
+          <dl>
+            <dt><a href="#initial-capital-input">初始总资金</a></dt>
+            <dd>回测开始时的账户总资产，也是最终收益率和累计收益率的计算基准。</dd>
+            <dt><a href="#initial-position-input">初始底仓比例</a></dt>
+            <dd>首根分钟 K 线按收盘价建立的初始持仓比例，其余资产保留为现金。初始股数同样按每手数量向下取整。</dd>
+            <dt><a href="#commission-rate-input">佣金费率</a></dt>
+            <dd>每笔佣金按“成交金额 × 佣金费率”计算，例如 0.00025 表示万分之 2.5。</dd>
+            <dt><a href="#minimum-commission-input">单笔最低佣金</a></dt>
+            <dd>每笔成交佣金的最低值。实际佣金取费率计算结果与该数值中的较大者。</dd>
+          </dl>
+        </details>
+      </aside>
+
+      <div class="workspace-main">
+        <section class="panel strategy-panel">
+      <div class="section-heading">
+        <div><p class="section-kicker">STRATEGY</p><h2>策略方案</h2></div>
+        <button id="reset-button" class="button secondary" type="button">恢复指定方案</button>
+      </div>
+      <form id="strategy-form">
+        <div class="form-grid">
+          <label>证券代码<input id="symbol-input" name="symbol" inputmode="numeric" maxlength="6" required></label>
+          <label>有效期（自然日）<input id="days-input" name="days" type="number" min="1" max="30" step="1" required></label>
+          <label>监控下限<input id="lower-bound-input" name="lower_bound" type="number" min="0.001" step="0.001" required></label>
+          <label>监控上限<input id="upper-bound-input" name="upper_bound" type="number" min="0.001" step="0.001" required></label>
+          <label>基准价<input id="base-price-input" name="base_price" type="number" min="0.001" step="0.001" required></label>
+          <!-- 百分比参数统一允许两位小数，兼容 2.5、20、30 等策略值。 -->
+          <label>上涨触发（%）<input id="rise-trigger-input" name="rise_trigger_percent" type="number" min="0.01" max="100" step="0.01" required></label>
+          <label>回落卖出（%）<input id="sell-pullback-input" name="sell_pullback_percent" type="number" min="0.01" max="100" step="0.01" required></label>
+          <label>下跌触发（%）<input id="fall-trigger-input" name="fall_trigger_percent" type="number" min="0.01" max="100" step="0.01" required></label>
+          <label>反弹买入（%）<input id="buy-rebound-input" name="buy_rebound_percent" type="number" min="0.01" max="100" step="0.01" required></label>
+          <label>单次金额（元）<input id="order-amount-input" name="order_amount" type="number" min="100" step="100" required></label>
+          <label>买入委托上浮<input id="buy-offset-input" name="buy_price_offset" type="number" min="0" step="0.001" required></label>
+          <label>卖出委托下调<input id="sell-offset-input" name="sell_price_offset" type="number" min="0" step="0.001" required></label>
+          <label>初始总资金（元）<input id="initial-capital-input" name="initial_capital" type="number" min="1000" step="1000" required></label>
+          <label>初始底仓比例（%）<input id="initial-position-input" name="initial_position_percent" type="number" min="0" max="100" step="5" required></label>
+          <label>佣金费率<input id="commission-rate-input" name="commission_rate" type="number" min="0" max="0.1" step="0.00001" required></label>
+          <label>单笔最低佣金（元）<input id="minimum-commission-input" name="minimum_commission" type="number" min="0" step="1" required></label>
+          <label>每手数量<input id="lot-size-input" name="lot_size" type="number" min="1" step="1" required></label>
+        </div>
+        <div class="form-footer">
+          <p>行情与每次结果会自动保存到本项目的 <code>data</code> 目录。</p>
+          <button id="run-button" class="button primary" type="submit">提取行情并开始回测</button>
+        </div>
+      </form>
+        </section>
+
+        <div id="message" role="status" aria-live="polite"></div>
+        <section id="report" class="report" hidden></section>
+
+        <section class="panel history-panel">
+          <div class="section-heading"><div><p class="section-kicker">HISTORY</p><h2>历史 JSON 报告</h2></div></div>
+          <div id="history" class="history-list"><p class="muted">正在读取历史报告……</p></div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <footer>非交易所官方行情 · 仅供策略研究 · 不构成投资建议</footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>
