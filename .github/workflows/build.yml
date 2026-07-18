@@ -52,9 +52,39 @@ jobs:
         run: python build_package.py --output artifacts
 
       - name: 上传平台压缩包
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: artifacts/grid-strategy-backtest-*
+          archive: false
           if-no-files-found: error
           retention-days: 14
+
+  # 构建矩阵全部成功后，汇总平台文件并创建正式 GitHub Release。
+  release:
+    name: 发布 GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      # v8 支持下载 upload-artifact v7 的非压缩单文件产物。
+      - name: 下载所有平台发布文件
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          pattern: grid-strategy-backtest-*
+          merge-multiple: true
+
+      # 使用 GitHub CLI 将五个平台文件直接挂到当前 Tag 的 Release Assets。
+      - name: 创建 Release 并上传发布文件
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --repo "$REPOSITORY" \
+            --title "$RELEASE_TAG" \
+            --generate-notes
