@@ -139,6 +139,8 @@ th { color: var(--muted); font-weight: 650; }
 .tag { display: inline-block; min-width: 52px; padding: 4px 8px; border-radius: 999px; text-align: center; font-weight: 750; }
 .tag.buy { background: #432328; color: #ffb7be; }
 .tag.sell { background: #17382c; color: #9ff0cd; }
+.tag.valuation { background: #26364a; color: #b9d8ff; }
+.ending-valuation-row td { border-top: 2px solid #456078; background: rgba(38, 54, 74, .2); }
 .warning-list, .assumption-list { margin: 16px 0 0; padding-left: 20px; color: #c3ccd5; }
 .warning-list { color: var(--warning); }
 .warning-list li, .assumption-list li { margin: 8px 0; line-height: 1.55; }

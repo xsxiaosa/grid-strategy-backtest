@@ -11,6 +11,8 @@ from itertools import product
 from pathlib import Path
 from typing import Any, Iterable
 
+from grid_backtest.runtime_paths import get_data_directory
+
 
 # 默认搜索范围刻意保持在可解释的规模内，完整组合数为 1764 组。
 DEFAULT_RISE_TRIGGERS = (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0)
@@ -339,9 +341,9 @@ def create_argument_parser() -> argparse.ArgumentParser:
         包含行情路径、日期、搜索范围和输出设置的解析器。
     """
 
-    project_root = Path(__file__).resolve().parent
+    data_directory = get_data_directory()
     parser = argparse.ArgumentParser(description="搜索回落卖出和反弹买入的最优参数组合")
-    parser.add_argument("--market", type=Path, default=project_root / "data" / "market" / "588000_1m_30d.json", help="分钟行情 JSON 路径")
+    parser.add_argument("--market", type=Path, default=data_directory / "market" / "588000_1m_30d.json", help="分钟行情 JSON 路径")
     parser.add_argument("--start-date", default="2026-07-01", help="回测开始日期，默认 2026-07-01")
     parser.add_argument("--end-date", default=None, help="回测结束日期，默认使用行情最后一天")
     parser.add_argument("--rise-triggers", type=parse_percentage_list, default=DEFAULT_RISE_TRIGGERS, help="上涨触发比例列表")
@@ -385,7 +387,7 @@ def main() -> int:
         item.buy_rebound_percent,
     ))
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    output_path = args.output or Path(__file__).resolve().parent / "data" / "optimization" / f"grid_search_{args.start_date.replace('-', '')}_{timestamp}.csv"
+    output_path = args.output or get_data_directory() / "optimization" / f"grid_search_{args.start_date.replace('-', '')}_{timestamp}.csv"
     write_results_csv(output_path, results)
 
     assert common is not None

@@ -10,12 +10,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .optimization import OptimizationManager
+from .runtime_paths import get_data_directory, get_web_directory
 from .service import BacktestService
 from .storage import JsonStorage
 
 
-PROJECT_DIRECTORY = Path(__file__).resolve().parent.parent
-WEB_DIRECTORY = PROJECT_DIRECTORY / "web"
+WEB_DIRECTORY = get_web_directory()
+DATA_DIRECTORY = get_data_directory()
 
 
 class GridBacktestRequestHandler(BaseHTTPRequestHandler):
@@ -218,7 +219,7 @@ def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Pat
         尚未开始监听循环的 ThreadingHTTPServer 实例。
     """
 
-    storage = JsonStorage(data_directory or PROJECT_DIRECTORY / "data")
+    storage = JsonStorage(data_directory or DATA_DIRECTORY)
     handler_class = type(
         "ConfiguredGridBacktestRequestHandler",
         (GridBacktestRequestHandler,),
@@ -249,7 +250,7 @@ def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
     )
     server = create_server(host, port)
     print(f"网格策略回测已启动：http://{host}:{port}")
-    print(f"JSON 数据目录：{(PROJECT_DIRECTORY / 'data').resolve()}")
+    print(f"JSON 数据目录：{DATA_DIRECTORY.resolve()}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

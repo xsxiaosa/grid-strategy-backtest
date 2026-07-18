@@ -1,0 +1,61 @@
+name: 多平台构建
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-2025
+            artifact: grid-strategy-backtest-windows-x64
+          - name: Linux x64
+            runner: ubuntu-24.04
+            artifact: grid-strategy-backtest-linux-x64
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            artifact: grid-strategy-backtest-linux-arm64
+          - name: macOS Intel x64
+            runner: macos-15-intel
+            artifact: grid-strategy-backtest-macos-x64
+          - name: macOS ARM64
+            runner: macos-15
+            artifact: grid-strategy-backtest-macos-arm64
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装 PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller==6.21.0
+
+      - name: 运行完整测试
+        run: python -m unittest discover -s tests -v
+
+      - name: 构建并验证目录包
+        run: python build_package.py --output artifacts
+
+      - name: 上传平台压缩包
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: artifacts/grid-strategy-backtest-*
+          if-no-files-found: error
+          retention-days: 14

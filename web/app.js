@@ -895,7 +895,7 @@ function renderReport(result) {
   const tradesPanel = document.createElement("section");
   tradesPanel.className = "panel report-panel";
   const tradesTitle = document.createElement("h2");
-  tradesTitle.textContent = "模拟成交明细";
+  tradesTitle.textContent = "模拟成交明细（含期末估值）";
   const tableWrap = document.createElement("div");
   tableWrap.className = "table-wrap";
   const table = document.createElement("table");
@@ -907,6 +907,19 @@ function renderReport(result) {
   head.append(headRow);
   const body = document.createElement("tbody");
   result.trades.forEach((trade) => body.append(createTradeRow(trade)));
+  // 交易明细按成交时点估值，追加期末估值行以便与顶部网格收益使用同一口径对照。
+  body.append(createTradeRow({
+    isEndingValuation: true,
+    timestamp: result.market_data.ended_at,
+    side: "VALUATION",
+    price: result.market_data.last_price,
+    cash_after: result.grid.cash,
+    shares_after: result.grid.shares,
+    position_value_after: result.grid.final_assets - result.grid.cash,
+    total_assets_after: result.grid.final_assets,
+    profit_after: result.grid.profit,
+    return_percent_after: result.grid.return_percent,
+  }));
   table.append(head, body);
   tableWrap.append(table);
   tradesPanel.append(tradesTitle, tableWrap);
@@ -931,6 +944,7 @@ function renderReport(result) {
  */
 function createTradeRow(trade) {
   const row = document.createElement("tr");
+  if (trade.isEndingValuation) row.className = "ending-valuation-row";
   const valueOrDash = (value, formatter = String) => value === undefined || value === null ? "—" : formatter(value);
   const values = [
     dateTime(trade.timestamp),
@@ -952,8 +966,8 @@ function createTradeRow(trade) {
     const cell = document.createElement("td");
     if (index === 1) {
       const tag = document.createElement("span");
-      tag.className = `tag ${value === "BUY" ? "buy" : "sell"}`;
-      tag.textContent = value === "BUY" ? "买入" : "卖出";
+      tag.className = `tag ${value === "BUY" ? "buy" : value === "SELL" ? "sell" : "valuation"}`;
+      tag.textContent = value === "BUY" ? "买入" : value === "SELL" ? "卖出" : "期末估值";
       cell.append(tag);
     } else {
       cell.textContent = String(value);
