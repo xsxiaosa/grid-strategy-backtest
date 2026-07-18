@@ -84,7 +84,14 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          gh release create "$RELEASE_TAG" release-assets/* \
+          # 直传 Artifact 下载后可能按 Artifact 名称保留目录，递归收集真实文件。
+          mapfile -d '' RELEASE_FILES < <(find release-assets -type f -print0)
+          if [ "${#RELEASE_FILES[@]}" -ne 5 ]; then
+            echo "Expected 5 release files, found ${#RELEASE_FILES[@]}"
+            exit 1
+          fi
+
+          gh release create "$RELEASE_TAG" "${RELEASE_FILES[@]}" \
             --repo "$REPOSITORY" \
             --title "$RELEASE_TAG" \
             --generate-notes
