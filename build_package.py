@@ -13,6 +13,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from grid_backtest.runtime_paths import configure_output_encoding
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 PYINSTALLER_VERSION = "6.21.0"
@@ -233,7 +235,7 @@ def build_package(output_directory: Path) -> Path:
     create_runtime_directories(package_directory)
     smoke_test(package_directory)
     archive_path = create_archive(package_directory, output_directory)
-    print(f"构建完成：{archive_path}")
+    print(f"Build complete: {archive_path}")
     return archive_path
 
 
@@ -244,6 +246,7 @@ def main() -> int:
         成功时返回 0。
     """
 
+    configure_output_encoding()
     arguments = parse_arguments()
     build_package(arguments.output)
     return 0
