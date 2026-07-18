@@ -14,19 +14,32 @@ class SimulationState:
     cash: float
     shares: int
     initial_assets: float
+    minimum_shares: int = 0
     armed_rise_peak: float | None = None
     armed_fall_trough: float | None = None
     trades: list[dict[str, Any]] = field(default_factory=list)
     commissions: float = 0.0
     skipped_for_funds: int = 0
     skipped_for_shares: int = 0
+    skipped_for_minimum_position: int = 0
     buy_count: int = 0
     sell_count: int = 0
     record_trade_details: bool = True
+    bars_processed: int = 0
+    position_percent_sum: float = 0.0
+    max_cash_percent: float = 0.0
+    minimum_position_bar_count: int = 0
+    current_minimum_position_bars: int = 0
+    longest_minimum_position_bars: int = 0
 
 
 class GridBacktestEngine:
     """使用确定性分钟收盘价规则执行网格和基准组合回测。"""
+
+    # 正收益且长期低仓位时，结果更接近择时避险，不应只按收益率解读。
+    LOW_EXPOSURE_WARNING_PERCENT = 30.0
+    # 基准价与首根行情偏差过大时，首次信号可能不代表真实建仓成本。
+    BASE_PRICE_WARNING_PERCENT = 5.0
 
     def run(self, config: StrategyConfig, market: dict[str, Any], inherited_warnings: list[str] | None = None) -> dict[str, Any]:
         """执行网格回测并生成可直接保存为 JSON 的结构化结果。
@@ -50,9 +63,10 @@ class GridBacktestEngine:
         last_price = float(bars[-1]["close"])
         target_position_value = config.initial_capital * config.initial_position_percent / 100
         initial_shares = self._floor_to_lot(target_position_value / first_price, config.lot_size)
+        minimum_shares = self._calculate_minimum_shares(initial_shares, config)
         initial_cash = config.initial_capital - initial_shares * first_price
         initial_assets = initial_cash + initial_shares * first_price
-        state = SimulationState(config.base_price, initial_cash, initial_shares, initial_assets)
+        state = SimulationState(config.base_price, initial_cash, initial_shares, initial_assets, minimum_shares)
         grid_peak_assets = initial_assets
         hold_peak_assets = initial_assets
         grid_max_drawdown = 0.0
@@ -62,7 +76,7 @@ class GridBacktestEngine:
         for bar in bars:
             self._process_bar(config, state, bar)
             close = float(bar["close"])
-            grid_assets = state.cash + state.shares * close
+            grid_assets, position_percent, cash_percent = self._update_exposure_stats(state, close)
             hold_assets = initial_cash + initial_shares * close
             grid_peak_assets = max(grid_peak_assets, grid_assets)
             hold_peak_assets = max(hold_peak_assets, hold_assets)
@@ -77,6 +91,8 @@ class GridBacktestEngine:
                 "volume": float(bar.get("volume", 0)),
                 "grid_profit": self._round_money(grid_assets - initial_assets),
                 "hold_profit": self._round_money(hold_assets - initial_assets),
+                "position_percent": self._round_percent(position_percent),
+                "cash_percent": self._round_percent(cash_percent),
             })
 
         grid_final_assets = state.cash + state.shares * last_price
@@ -85,11 +101,19 @@ class GridBacktestEngine:
         hold_profit = hold_final_assets - initial_assets
         grid_return = grid_profit / initial_assets * 100
         hold_return = hold_profit / initial_assets * 100
+        exposure_metrics = self._build_exposure_metrics(state, grid_final_assets, last_price, grid_return)
         warnings = list(inherited_warnings or [])
         if state.skipped_for_funds:
             warnings.append(f"{state.skipped_for_funds} 次买入信号因现金不足未成交。")
         if state.skipped_for_shares:
             warnings.append(f"{state.skipped_for_shares} 次卖出信号因底仓不足未成交。")
+        if state.skipped_for_minimum_position:
+            warnings.append(f"{state.skipped_for_minimum_position} 次卖出信号因最低仓位限制未成交。")
+        if exposure_metrics["low_exposure_warning"]:
+            warnings.append("本次正收益伴随较低平均或期末仓位，收益可能主要来自回避下跌，不能单独视为网格波动收益。")
+        base_price_deviation = abs(first_price - config.base_price) / config.base_price * 100
+        if base_price_deviation > self.BASE_PRICE_WARNING_PERCENT:
+            warnings.append(f"网格基准价与首根行情价格偏差 {base_price_deviation:.2f}%，首次信号可能与实际建仓成本不一致。")
         if not state.trades:
             warnings.append("回测区间内没有产生网格成交，请检查基准价、触发比例与监控区间。")
 
@@ -112,6 +136,8 @@ class GridBacktestEngine:
                 "cash": self._round_money(initial_cash),
                 "shares": initial_shares,
                 "position_value": self._round_money(initial_shares * first_price),
+                "minimum_shares": minimum_shares,
+                "minimum_position_percent": self._round_percent(config.minimum_position_percent),
             },
             "grid": {
                 "final_assets": self._round_money(grid_final_assets),
@@ -124,6 +150,7 @@ class GridBacktestEngine:
                 "buy_count": state.buy_count,
                 "sell_count": state.sell_count,
                 "max_drawdown_percent": self._round_percent(grid_max_drawdown),
+                **exposure_metrics,
             },
             "buy_and_hold": {
                 "final_assets": self._round_money(hold_final_assets),
@@ -146,6 +173,7 @@ class GridBacktestEngine:
                 "回落卖出比例表示从上涨峰值向当前网格基准回撤的比例；反弹买入比例表示从下跌谷值向当前网格基准反弹的比例。",
                 "分钟 K 线不含真实买一卖一，程序以收盘价近似盘口，并将偏移后的成交价限制在该分钟高低价内。",
                 "网格和直接持有使用完全相同的初始现金与底仓，直接持有组合不再交易。",
+                "最低仓位按初始建仓股数计算，卖出信号不会使持仓低于该股数；设置为 0% 时允许完全空仓。",
                 "默认按 ETF 规则不计印花税；佣金取成交金额乘费率与单笔最低佣金中的较高值。",
             ],
         }
@@ -176,6 +204,7 @@ class GridBacktestEngine:
         last_price = float(bars[-1]["close"])
         target_position_value = config.initial_capital * config.initial_position_percent / 100
         initial_shares = self._floor_to_lot(target_position_value / first_price, config.lot_size)
+        minimum_shares = self._calculate_minimum_shares(initial_shares, config)
         initial_cash = config.initial_capital - initial_shares * first_price
         initial_assets = initial_cash + initial_shares * first_price
         state = SimulationState(
@@ -183,6 +212,7 @@ class GridBacktestEngine:
             initial_cash,
             initial_shares,
             initial_assets,
+            minimum_shares,
             record_trade_details=False,
         )
         grid_peak_assets = initial_assets
@@ -190,7 +220,7 @@ class GridBacktestEngine:
 
         for bar in bars:
             self._process_bar(config, state, bar)
-            grid_assets = state.cash + state.shares * float(bar["close"])
+            grid_assets, _, _ = self._update_exposure_stats(state, float(bar["close"]))
             grid_peak_assets = max(grid_peak_assets, grid_assets)
             grid_max_drawdown = max(
                 grid_max_drawdown,
@@ -203,6 +233,7 @@ class GridBacktestEngine:
         hold_profit = hold_final_assets - initial_assets
         grid_return = grid_profit / initial_assets * 100
         hold_return = hold_profit / initial_assets * 100
+        exposure_metrics = self._build_exposure_metrics(state, grid_final_assets, last_price, grid_return)
         return {
             # 排名使用未舍入值，展示层再按普通报告口径格式化。
             "final_assets_raw": grid_final_assets,
@@ -219,6 +250,94 @@ class GridBacktestEngine:
             "sell_count": state.sell_count,
             "skipped_for_funds": state.skipped_for_funds,
             "skipped_for_shares": state.skipped_for_shares,
+            "skipped_for_minimum_position": state.skipped_for_minimum_position,
+            **exposure_metrics,
+        }
+
+    @classmethod
+    def _calculate_minimum_shares(cls, initial_shares: int, config: StrategyConfig) -> int:
+        """根据初始建仓股数计算回测期间必须保留的最小持仓。
+        Args:
+            initial_shares: 回测开始时按首根行情价格建立的初始股数。
+            config: 包含最低仓位比例和每手数量的策略配置。
+        Returns:
+            已按每手数量向下取整、且不超过初始股数的最低持仓股数。
+        """
+
+        target_shares = initial_shares * config.minimum_position_percent / 100
+        return min(initial_shares, cls._floor_to_lot(target_shares, config.lot_size))
+
+    @staticmethod
+    def _update_exposure_stats(state: SimulationState, close: float) -> tuple[float, float, float]:
+        """按当前收盘价累计仓位、现金和最低仓位持续时间统计。
+        Args:
+            state: 当前回测账户状态及其累计统计字段。
+            close: 当前分钟 K 线收盘价。
+        Returns:
+            当前网格组合总资产、持仓占比和现金占比。
+        """
+
+        position_value = state.shares * close
+        total_assets = state.cash + position_value
+        if total_assets > 0:
+            position_percent = position_value / total_assets * 100
+            cash_percent = max(0.0, state.cash / total_assets * 100)
+        else:
+            position_percent = 0.0
+            cash_percent = 0.0
+        state.bars_processed += 1
+        state.position_percent_sum += position_percent
+        state.max_cash_percent = max(state.max_cash_percent, cash_percent)
+        if state.shares <= state.minimum_shares:
+            state.minimum_position_bar_count += 1
+            state.current_minimum_position_bars += 1
+            state.longest_minimum_position_bars = max(
+                state.longest_minimum_position_bars,
+                state.current_minimum_position_bars,
+            )
+        else:
+            state.current_minimum_position_bars = 0
+        return total_assets, position_percent, cash_percent
+
+    def _build_exposure_metrics(
+        self,
+        state: SimulationState,
+        final_assets: float,
+        last_price: float,
+        grid_return: float,
+    ) -> dict[str, float | int | bool]:
+        """整理完整回测和轻量回测共同使用的仓位利用率指标。
+        Args:
+            state: 已经处理完全部行情的账户状态。
+            final_assets: 以最后收盘价估值后的网格组合总资产。
+            last_price: 回测区间最后一根 K 线的收盘价。
+            grid_return: 网格组合最终收益率，用于判断低仓位正收益提示。
+        Returns:
+            可直接合并到报告或优化摘要中的仓位统计字典。
+        """
+
+        final_position_value = state.shares * last_price
+        if final_assets > 0:
+            final_position_percent = final_position_value / final_assets * 100
+            final_cash_percent = max(0.0, state.cash / final_assets * 100)
+        else:
+            final_position_percent = 0.0
+            final_cash_percent = 0.0
+        average_position_percent = state.position_percent_sum / max(1, state.bars_processed)
+        low_exposure_warning = grid_return > 0 and (
+            average_position_percent < self.LOW_EXPOSURE_WARNING_PERCENT
+            or final_position_percent < self.LOW_EXPOSURE_WARNING_PERCENT
+        )
+        return {
+            "minimum_shares": state.minimum_shares,
+            "average_position_percent": self._round_percent(average_position_percent),
+            "final_position_percent": self._round_percent(final_position_percent),
+            "final_cash_percent": self._round_percent(final_cash_percent),
+            "max_cash_percent": self._round_percent(state.max_cash_percent),
+            "minimum_position_bar_count": state.minimum_position_bar_count,
+            "longest_minimum_position_bars": state.longest_minimum_position_bars,
+            "skipped_for_minimum_position": state.skipped_for_minimum_position,
+            "low_exposure_warning": low_exposure_warning,
         }
 
     def _process_bar(self, config: StrategyConfig, state: SimulationState, bar: dict[str, Any]) -> None:
@@ -274,10 +393,20 @@ class GridBacktestEngine:
         quantity = self._floor_to_lot(config.order_amount / price, config.lot_size)
         if quantity <= 0:
             return
-        if side == "SELL" and quantity > state.shares:
-            state.skipped_for_shares += 1
-            state.armed_rise_peak = None
-            return
+        if side == "SELL":
+            if state.minimum_shares > 0:
+                # 启用最低仓位时，把订单数量截断到可卖出的战术仓位。
+                sellable_shares = self._floor_to_lot(state.shares - state.minimum_shares, config.lot_size)
+                quantity = min(quantity, sellable_shares)
+                if quantity <= 0:
+                    state.skipped_for_minimum_position += 1
+                    state.armed_rise_peak = None
+                    return
+            elif quantity > state.shares:
+                # 最低仓位为 0% 时保留旧行为：固定订单无法完整成交则跳过。
+                state.skipped_for_shares += 1
+                state.armed_rise_peak = None
+                return
         if side == "BUY":
             while quantity > 0 and quantity * price + self._commission(quantity * price, config) > state.cash:
                 quantity -= config.lot_size

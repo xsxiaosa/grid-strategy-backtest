@@ -177,6 +177,9 @@ class SummaryAndRankingTests(unittest.TestCase):
         self.assertEqual(full["grid"]["trade_count"], summary["trade_count"])
         self.assertEqual(full["grid"]["buy_count"], summary["buy_count"])
         self.assertEqual(full["grid"]["sell_count"], summary["sell_count"])
+        self.assertEqual(full["grid"]["final_position_percent"], summary["final_position_percent"])
+        self.assertEqual(full["grid"]["average_position_percent"], summary["average_position_percent"])
+        self.assertEqual(full["grid"]["low_exposure_warning"], summary["low_exposure_warning"])
         self.assertEqual(full["comparison"]["excess_return_percent"], summary["excess_return_percent"])
 
     def test_select_extremes_uses_return_then_tie_breakers(self) -> None:
@@ -191,6 +194,17 @@ class SummaryAndRankingTests(unittest.TestCase):
         best, worst = select_extremes(values, limit=2)
         self.assertEqual([20, 10], [item["rise_trigger_percent"] for item in best])
         self.assertEqual([40, 30], [item["rise_trigger_percent"] for item in worst])
+
+    def test_low_exposure_positive_result_is_ranked_after_normal_result(self) -> None:
+        """正收益但低仓位的候选不应仅凭收益率压过正常仓位候选。"""
+
+        normal = result(2.0, 4.0, 4, 2.0, 10)
+        low_exposure = result(5.0, 6.0, 4, 2.0, 20)
+        low_exposure["low_exposure_warning"] = True
+
+        best, _ = select_extremes([low_exposure, normal], limit=2)
+
+        self.assertEqual([10, 20], [item["rise_trigger_percent"] for item in best])
 
     def test_select_extremes_returns_all_when_fewer_than_ten(self) -> None:
         """候选不足十组时两端列表都应返回实际存在的全部结果。"""

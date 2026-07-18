@@ -26,7 +26,7 @@ const DEFAULT_CONFIG = {
   symbol: "588000", days: 30, lower_bound: 1.45, upper_bound: 2.05, base_price: 1.74,
   rise_trigger_percent: 2.5, sell_pullback_percent: 20, fall_trigger_percent: 2.5,
   buy_rebound_percent: 30, order_amount: 3000, buy_price_offset: 0.001,
-  sell_price_offset: 0.001, initial_capital: 30000, initial_position_percent: 50,
+  sell_price_offset: 0.001, initial_capital: 30000, initial_position_percent: 50, minimum_position_percent: 20,
   commission_rate: 0.00025, minimum_commission: 0, lot_size: 100
 };
 
@@ -869,7 +869,10 @@ function renderReport(result) {
     createMetric("网格收益", `${money(result.grid.profit)} 元`, result.grid.profit),
     createMetric("直接持有收益", `${money(result.buy_and_hold.profit)} 元`, result.buy_and_hold.profit),
     createMetric("网格成交", `${result.grid.trade_count} 笔`),
-    createMetric("累计佣金", `${money(result.grid.commission)} 元`)
+    createMetric("累计佣金", `${money(result.grid.commission)} 元`),
+    createMetric("最终持仓占比", result.grid.final_position_percent == null ? "—" : percent(result.grid.final_position_percent)),
+    createMetric("平均持仓占比", result.grid.average_position_percent == null ? "—" : percent(result.grid.average_position_percent)),
+    createMetric("最终现金占比", result.grid.final_cash_percent == null ? "—" : percent(result.grid.final_cash_percent))
   );
   const chartsPanel = createChartsPanel(result);
 
@@ -885,6 +888,8 @@ function renderReport(result) {
     createDetail("实际行情区间", `${dateTime(result.market_data.started_at)} 至 ${dateTime(result.market_data.ended_at)}`),
     createDetail("首末价格", `${result.market_data.first_price.toFixed(3)} → ${result.market_data.last_price.toFixed(3)}`),
     createDetail("共同初始组合", `${result.initial.shares} 份 + 现金 ${money(result.initial.cash)} 元`),
+    createDetail("最低保留仓位", `${result.initial.minimum_shares ?? "—"} 份 / ${result.initial.minimum_position_percent == null ? "—" : percent(result.initial.minimum_position_percent)}`),
+    createDetail("最低仓位持续时间", result.grid.longest_minimum_position_bars == null ? "—" : `${result.grid.longest_minimum_position_bars} 根 K 线`),
     createDetail("最大回撤", `网格 ${percent(result.grid.max_drawdown_percent)} / 持有 ${percent(result.buy_and_hold.max_drawdown_percent)}`),
     createDetail("报告编号", result.report_id),
     createDetail("报告 JSON", result.report_file || "历史报告文件"),

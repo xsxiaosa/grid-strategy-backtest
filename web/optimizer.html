@@ -18,6 +18,7 @@
     <div class="hero-actions">
       <nav class="page-nav" aria-label="主要页面">
         <a class="nav-link" href="/index.html">普通回测</a>
+        <a class="nav-link" href="/compare.html">历史对比</a>
         <a class="nav-link active" href="/optimizer.html" aria-current="page">参数优化</a>
       </nav>
       <div class="storage-badge"><span></span>本机 Python 计算</div>
@@ -70,7 +71,7 @@
 
         <details class="fixed-config">
           <summary>固定回测条件（单次金额不参与搜索）</summary>
-          <p class="muted fixed-config-help">这些条件在一次任务的全部组合中保持不变，默认读取普通回测页最近保存的配置。</p>
+          <p class="muted fixed-config-help">这些条件在一次任务的全部组合中保持不变，默认读取普通回测页最近保存的配置；最低保留仓位按初始股数计算。</p>
           <div class="form-grid compact-form-grid">
             <label for="opt-symbol">证券代码<input id="opt-symbol" data-config-field="symbol" inputmode="numeric" maxlength="6" required></label>
             <label for="opt-days">有效期（自然日）<input id="opt-days" data-config-field="days" type="number" min="1" max="30" step="1" required></label>
@@ -82,6 +83,7 @@
             <label for="opt-sell-offset">卖出委托下调<input id="opt-sell-offset" data-config-field="sell_price_offset" type="number" min="0" step="0.001" required></label>
             <label for="opt-capital">初始总资金（元）<input id="opt-capital" data-config-field="initial_capital" type="number" min="1000" step="1000" required></label>
             <label for="opt-position">初始底仓比例（%）<input id="opt-position" data-config-field="initial_position_percent" type="number" min="0" max="100" step="5" required></label>
+            <label for="opt-minimum-position">最低保留仓位（%）<input id="opt-minimum-position" data-config-field="minimum_position_percent" type="number" min="0" max="100" step="5" required></label>
             <label for="opt-rate">佣金费率<input id="opt-rate" data-config-field="commission_rate" type="number" min="0" max="0.1" step="0.00001" required></label>
             <label for="opt-min-commission">单笔最低佣金（元）<input id="opt-min-commission" data-config-field="minimum_commission" type="number" min="0" step="1" required></label>
             <label for="opt-lot">每手数量<input id="opt-lot" data-config-field="lot_size" type="number" min="1" step="1" required></label>
@@ -100,15 +102,19 @@
 
     <div id="optimizer-message" role="status" aria-live="polite"></div>
 
-    <!-- 历史区只展示轻量摘要，用户明确选择后再读取完整结果，避免页面初始化传输冗余数据。 -->
-    <section class="panel history-panel optimizer-history-panel" aria-labelledby="optimizer-history-title">
-      <div class="section-heading">
+    <!-- 历史区默认折叠，使用原生 details 保留完整的键盘操作和展开状态语义。 -->
+    <details class="panel history-panel optimizer-history-panel" aria-labelledby="optimizer-history-title">
+      <summary class="optimizer-history-summary">
         <div><p class="section-kicker">HISTORY</p><h2 id="optimizer-history-title">导入历史</h2></div>
-        <button id="refresh-history-button" class="button secondary" type="button">刷新历史</button>
+      </summary>
+      <div class="optimizer-history-body">
+        <div class="optimizer-history-toolbar">
+          <p class="muted optimizer-history-help">导入本机已保存的优化记录，可还原当时的搜索条件并查看最好与最差结果。</p>
+          <button id="refresh-history-button" class="button secondary" type="button">刷新历史</button>
+        </div>
+        <div id="optimizer-history" class="history-list"><p class="muted">正在读取历史优化记录……</p></div>
       </div>
-      <p class="muted optimizer-history-help">导入本机已保存的优化记录，可还原当时的搜索条件并查看最好与最差结果。</p>
-      <div id="optimizer-history" class="history-list"><p class="muted">正在读取历史优化记录……</p></div>
-    </section>
+    </details>
 
     <section id="progress-panel" class="panel progress-panel" hidden aria-labelledby="progress-title">
       <div class="progress-heading">

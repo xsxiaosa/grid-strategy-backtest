@@ -360,7 +360,7 @@ function createResultTable(results, config, caption) {
   tableCaption.textContent = caption;
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  ["排名", "收益率", "超额收益率", "最大回撤", "成交", "佣金（元）", "上涨触发", "回落卖出", "下跌触发", "反弹买入", "操作"].forEach((text) => {
+  ["排名", "收益率", "超额收益率", "最大回撤", "成交", "佣金（元）", "最终仓位", "平均仓位", "提示", "上涨触发", "回落卖出", "下跌触发", "反弹买入", "操作"].forEach((text) => {
     const cell = document.createElement("th");
     cell.scope = "col";
     cell.textContent = text;
@@ -377,6 +377,9 @@ function createResultTable(results, config, caption) {
       formatPercent(result.max_drawdown_percent),
       `${result.trade_count}（买 ${result.buy_count} / 卖 ${result.sell_count}）`,
       Number(result.commission).toFixed(2),
+      result.final_position_percent == null ? "—" : formatPercent(result.final_position_percent),
+      result.average_position_percent == null ? "—" : formatPercent(result.average_position_percent),
+      result.low_exposure_warning ? "低仓位收益" : "—",
       formatPercent(result.rise_trigger_percent, 2),
       formatPercent(result.sell_pullback_percent, 2),
       formatPercent(result.fall_trigger_percent, 2),

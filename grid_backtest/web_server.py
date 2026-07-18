@@ -158,6 +158,8 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
             "/styles.css": "styles.css",
             "/optimizer.html": "optimizer.html",
             "/optimizer.js": "optimizer.js",
+            "/compare.html": "compare.html",
+            "/compare.js": "compare.js",
         }
         filename = static_files.get(path)
         if filename is None:

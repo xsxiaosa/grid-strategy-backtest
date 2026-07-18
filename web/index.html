@@ -18,6 +18,7 @@
     <div class="hero-actions">
       <nav class="page-nav" aria-label="主要页面">
         <a class="nav-link active" href="/index.html" aria-current="page">普通回测</a>
+        <a class="nav-link" href="/compare.html">历史对比</a>
         <!-- 参数优化是可并行使用的长任务页面，新标签打开可保留当前回测表单与报告。 -->
         <a class="nav-link" href="/optimizer.html" target="_blank" rel="noopener">参数优化</a>
       </nav>
@@ -84,6 +85,8 @@
             <dd>回测开始时的账户总资产，也是最终收益率和累计收益率的计算基准。</dd>
             <dt><a href="#initial-position-input">初始底仓比例</a></dt>
             <dd>首根分钟 K 线按收盘价建立的初始持仓比例，其余资产保留为现金。初始股数同样按每手数量向下取整。</dd>
+            <dt><a href="#minimum-position-input">最低保留仓位</a></dt>
+            <dd>按初始持仓股数计算的核心仓位下限，卖出信号不会减少这部分持仓；设置为 0% 时允许完全空仓。</dd>
             <dt><a href="#commission-rate-input">佣金费率</a></dt>
             <dd>每笔佣金按“成交金额 × 佣金费率”计算，例如 0.00025 表示万分之 2.5。</dd>
             <dt><a href="#minimum-commission-input">单笔最低佣金</a></dt>
@@ -123,6 +126,7 @@
           <label>卖出委托下调<input id="sell-offset-input" name="sell_price_offset" type="number" min="0" step="0.001" required></label>
           <label>初始总资金（元）<input id="initial-capital-input" name="initial_capital" type="number" min="1000" step="1000" required></label>
           <label>初始底仓比例（%）<input id="initial-position-input" name="initial_position_percent" type="number" min="0" max="100" step="5" required></label>
+          <label>最低保留仓位（%）<input id="minimum-position-input" name="minimum_position_percent" type="number" min="0" max="100" step="5" required></label>
           <label>佣金费率<input id="commission-rate-input" name="commission_rate" type="number" min="0" max="0.1" step="0.00001" required></label>
           <label>单笔最低佣金（元）<input id="minimum-commission-input" name="minimum_commission" type="number" min="0" step="1" required></label>
           <label>每手数量<input id="lot-size-input" name="lot_size" type="number" min="1" step="1" required></label>
