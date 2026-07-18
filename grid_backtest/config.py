@@ -22,6 +22,7 @@ class StrategyConfig:
     sell_price_offset: float = 0.001
     initial_capital: float = 30000.0
     initial_position_percent: float = 50.0
+    minimum_position_percent: float = 20.0
     commission_rate: float = 0.00025
     minimum_commission: float = 5.0
     lot_size: int = 100
@@ -46,6 +47,12 @@ class StrategyConfig:
             if unknown:
                 raise ValueError(f"存在未知策略字段：{', '.join(unknown)}")
             values.update(raw)
+            # 旧配置可能只设置了较低的初始底仓，缺少新字段时不能凭空要求更高最低仓位。
+            if "minimum_position_percent" not in raw:
+                values["minimum_position_percent"] = min(
+                    float(values["minimum_position_percent"]),
+                    float(values["initial_position_percent"]),
+                )
         try:
             config = cls(
                 symbol=str(values["symbol"]).strip(),
@@ -62,6 +69,7 @@ class StrategyConfig:
                 sell_price_offset=float(values["sell_price_offset"]),
                 initial_capital=float(values["initial_capital"]),
                 initial_position_percent=float(values["initial_position_percent"]),
+                minimum_position_percent=float(values["minimum_position_percent"]),
                 commission_rate=float(values["commission_rate"]),
                 minimum_commission=float(values["minimum_commission"]),
                 lot_size=int(values["lot_size"]),
@@ -96,6 +104,10 @@ class StrategyConfig:
             raise ValueError("单次金额和初始资金必须大于 0")
         if not 0 <= self.initial_position_percent <= 100:
             raise ValueError("初始底仓比例必须位于 0% 至 100% 之间")
+        if not 0 <= self.minimum_position_percent <= 100:
+            raise ValueError("最低仓位比例必须位于 0% 至 100% 之间")
+        if self.minimum_position_percent > self.initial_position_percent:
+            raise ValueError("最低仓位比例不得高于初始底仓比例")
         if self.buy_price_offset < 0 or self.sell_price_offset < 0:
             raise ValueError("委托价格偏移不得为负数")
         if self.commission_rate < 0 or self.minimum_commission < 0:
@@ -111,4 +123,3 @@ class StrategyConfig:
         """
 
         return asdict(self)
-

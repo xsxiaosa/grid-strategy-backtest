@@ -6,6 +6,26 @@ import sys
 from pathlib import Path
 
 
+def configure_output_encoding() -> None:
+    """为被重定向的标准输出流配置 UTF-8 编码。
+
+    PyInstaller 冻结程序在 GitHub Actions 等非交互管道中运行时，标准输出
+    可能采用 Windows 本地代码页；项目的中文帮助和日志因此可能触发编码异常。
+    仅调整非交互流，避免改变用户在本地交互式终端中的显示代码页。
+
+    Returns:
+        无返回值；可重新配置的标准输出流会使用 UTF-8 和替换错误处理器。
+    """
+
+    # PyInstaller 冻结程序不会可靠地继承 PYTHONUTF8，入口层显式配置更稳定。
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or stream.isatty():
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def get_resource_directory() -> Path:
     """返回只读资源目录，兼容源码运行和 PyInstaller 目录包运行。
 

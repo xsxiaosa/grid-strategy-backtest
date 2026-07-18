@@ -144,7 +144,25 @@ def smoke_test(package_directory: Path) -> None:
     executable_suffix = ".exe" if get_platform_name() == "windows" else ""
     server_executable = package_directory / "grid-backtest" / f"grid-backtest{executable_suffix}"
     optimizer_executable = package_directory / "grid-optimizer" / f"grid-optimizer{executable_suffix}"
-    subprocess.run([str(optimizer_executable), "--help"], cwd=package_directory, check=True, capture_output=True, text=True)
+    optimizer_result = subprocess.run(
+        [str(optimizer_executable), "--help"],
+        cwd=package_directory,
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        errors="replace",
+        text=True,
+    )
+    if optimizer_result.returncode != 0:
+        # 自检失败时保留冻结程序的输出，否则 CI 日志只有一个无诊断价值的退出码。
+        diagnostic_output = "\n".join(
+            output for output in (optimizer_result.stdout, optimizer_result.stderr) if output
+        ).strip()
+        raise RuntimeError(
+            "打包后的命令行优化器 --help 失败，"
+            f"退出码为 {optimizer_result.returncode}。\n"
+            f"{diagnostic_output or '优化器没有输出诊断信息。'}"
+        )
 
     process = subprocess.Popen([str(server_executable)], cwd=package_directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:

@@ -42,12 +42,26 @@ class StrategyConfigTests(unittest.TestCase):
         self.assertEqual((2.5, 20.0, 2.5, 30.0), (config.rise_trigger_percent, config.sell_pullback_percent, config.fall_trigger_percent, config.buy_rebound_percent))
         self.assertEqual(3000.0, config.order_amount)
         self.assertEqual(30, config.days)
+        self.assertEqual(20.0, config.minimum_position_percent)
 
     def test_rejects_base_outside_monitoring_range(self) -> None:
         """基准价位于监控区间之外时应给出明确错误。"""
 
         with self.assertRaisesRegex(ValueError, "基准价必须位于监控区间内"):
             StrategyConfig.from_dict({"base_price": 2.10})
+
+    def test_rejects_minimum_position_above_initial_position(self) -> None:
+        """最低仓位不得高于初始底仓。"""
+
+        with self.assertRaisesRegex(ValueError, "最低仓位比例不得高于初始底仓比例"):
+            StrategyConfig.from_dict({"initial_position_percent": 20, "minimum_position_percent": 30})
+
+    def test_legacy_config_with_zero_initial_position_defaults_to_zero_floor(self) -> None:
+        """缺少新字段的旧配置仍应允许零初始底仓。"""
+
+        config = StrategyConfig.from_dict({"initial_position_percent": 0})
+
+        self.assertEqual(0.0, config.minimum_position_percent)
 
 
 class GridBacktestEngineTests(unittest.TestCase):
@@ -76,10 +90,54 @@ class GridBacktestEngineTests(unittest.TestCase):
         first_trade = result["trades"][0]
         self.assertAlmostEqual(first_trade["cash_after"] + first_trade["position_value_after"], first_trade["total_assets_after"], places=2)
         self.assertAlmostEqual(first_trade["total_assets_after"] - result["initial"]["assets"], first_trade["profit_after"], places=2)
-        self.assertEqual(5, len(result["assumptions"]))
+        self.assertEqual(6, len(result["assumptions"]))
         self.assertEqual(5, len(result["chart_data"]))
         self.assertIn("grid_profit", result["chart_data"][-1])
         self.assertIn("hold_profit", result["chart_data"][-1])
+        self.assertIn("final_position_percent", result["grid"])
+        self.assertIn("average_position_percent", result["grid"])
+
+    def test_minimum_position_caps_sell_quantity(self) -> None:
+        """卖出信号只能减少超过最低保留仓位的股数。"""
+
+        config = StrategyConfig.from_dict({
+            "base_price": 1.0,
+            "lower_bound": 0.8,
+            "upper_bound": 1.2,
+            "initial_capital": 10000,
+            "initial_position_percent": 100,
+            "minimum_position_percent": 50,
+            "order_amount": 10000,
+            "commission_rate": 0,
+            "minimum_commission": 0,
+        })
+        result = GridBacktestEngine().run(config, market_from_closes([1.0, 1.03, 1.02]))
+
+        self.assertEqual(10000, result["initial"]["shares"])
+        self.assertEqual(5000, result["initial"]["minimum_shares"])
+        self.assertEqual(5000, result["trades"][0]["quantity"])
+        self.assertEqual(5000, result["grid"]["shares"])
+        self.assertEqual(0, result["grid"]["skipped_for_minimum_position"])
+
+    def test_full_minimum_position_blocks_sell(self) -> None:
+        """最低仓位等于初始仓位时应阻止卖出并记录跳过原因。"""
+
+        config = StrategyConfig.from_dict({
+            "base_price": 1.0,
+            "lower_bound": 0.8,
+            "upper_bound": 1.2,
+            "initial_capital": 10000,
+            "initial_position_percent": 100,
+            "minimum_position_percent": 100,
+            "order_amount": 1000,
+            "commission_rate": 0,
+            "minimum_commission": 0,
+        })
+        result = GridBacktestEngine().run(config, market_from_closes([1.0, 1.03, 1.02]))
+
+        self.assertEqual(0, result["grid"]["trade_count"])
+        self.assertEqual(1, result["grid"]["skipped_for_minimum_position"])
+        self.assertEqual(result["initial"]["shares"], result["grid"]["shares"])
 
     def test_no_trade_matches_buy_and_hold(self) -> None:
         """没有网格成交时两种组合的最终资产应完全相同。"""

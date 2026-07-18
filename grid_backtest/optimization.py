@@ -330,10 +330,12 @@ def best_sort_key(result: dict[str, Any]) -> tuple[Any, ...]:
         result: 单个候选参数的轻量回测结果。
 
     Returns:
-        依次体现高收益、低回撤、少成交、低佣金和参数字典序的元组。
+        依次体现正常仓位、低仓位提示、高收益、低回撤、少成交、低佣金和参数字典序的元组。
     """
 
     return (
+        # 先把正收益但低仓位的结果标记到普通候选之后，避免空仓避跌直接占据最优位。
+        int(bool(result.get("low_exposure_warning", False))),
         -float(result["return_percent_raw"]),
         float(result["max_drawdown_percent_raw"]),
         int(result["trade_count"]),

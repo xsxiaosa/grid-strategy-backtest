@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="对比两组历史网格策略回测结果，查看归一化 K 线与收益轨迹。">
+  <title>历史回测对比 · 网格策略回测</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- 对比页复用主应用导航，保证普通回测、历史对比和参数优化之间可以快速切换。 -->
+  <header class="hero compare-hero">
+    <div>
+      <p class="eyebrow">HISTORY COMPARISON</p>
+      <h1>历史回测对比</h1>
+      <p class="hero-copy">选择两组已保存的回测报告，叠加查看归一化 K 线、网格收益和关键风险指标。</p>
+    </div>
+    <div class="hero-actions">
+      <nav class="page-nav" aria-label="主要页面">
+        <a class="nav-link" href="/index.html">普通回测</a>
+        <a class="nav-link active" href="/compare.html" aria-current="page">历史对比</a>
+        <a class="nav-link" href="/optimizer.html">参数优化</a>
+      </nav>
+      <div class="storage-badge"><span></span>JSON 存储 · 无数据库</div>
+    </div>
+  </header>
+
+  <main>
+    <!-- 报告选择区域使用显式标签和下拉框，支持键盘完整操作。 -->
+    <section class="panel comparison-selector-panel" aria-labelledby="comparison-selector-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">COMPARE REPORTS</p>
+          <h2 id="comparison-selector-title">选择两组历史报告</h2>
+        </div>
+        <button id="refresh-history-button" class="button secondary" type="button">刷新历史</button>
+      </div>
+      <p class="muted comparison-help">K 线按各自首根收盘价归一化为 100，适合比较不同价格区间；收益曲线按各自初始资产计算为百分比。</p>
+      <div class="comparison-select-grid">
+        <div class="comparison-source source-a">
+          <label for="report-a-select">报告 A</label>
+          <select id="report-a-select" aria-label="选择报告 A" disabled>
+            <option>正在读取历史报告……</option>
+          </select>
+          <p id="report-a-meta" class="comparison-source-meta">请选择一组历史报告。</p>
+        </div>
+        <div class="comparison-source source-b">
+          <label for="report-b-select">报告 B</label>
+          <select id="report-b-select" aria-label="选择报告 B" disabled>
+            <option>正在读取历史报告……</option>
+          </select>
+          <p id="report-b-meta" class="comparison-source-meta">请选择另一组历史报告。</p>
+        </div>
+      </div>
+    </section>
+
+    <div id="compare-message" class="comparison-message" role="status" aria-live="polite"></div>
+
+    <!-- 只有两组完整报告加载成功后才显示图表与指标，避免把缺失数据误显示成 0。 -->
+    <section id="comparison-dashboard" class="comparison-dashboard" hidden aria-live="polite">
+      <section id="comparison-verdict" class="comparison-verdict panel" aria-labelledby="comparison-verdict-title"></section>
+
+      <section class="panel report-panel compare-chart-panel" aria-labelledby="kline-title">
+        <div class="chart-heading">
+          <div>
+            <p class="section-kicker">PRICE OVERLAY</p>
+            <h2 id="kline-title">归一化 K 线叠加</h2>
+            <p class="muted chart-subtitle">每组数据从首根收盘价 100 开始，横轴按各自回测进度对齐。</p>
+          </div>
+          <div id="comparison-zoom-controls" class="chart-controls comparison-chart-controls" role="group" aria-label="叠加图缩放">
+            <span id="comparison-zoom-status" class="zoom-status" aria-live="polite">显示全部区间</span>
+            <button class="range-button comparison-zoom-range" type="button" data-zoom-start="0.5" data-zoom-end="1">近 50%</button>
+            <button class="range-button comparison-zoom-range active" type="button" data-zoom-start="0" data-zoom-end="1" aria-pressed="true">全部</button>
+            <button id="comparison-zoom-in" class="range-button" type="button" aria-label="放大叠加图">放大</button>
+            <button id="comparison-zoom-out" class="range-button" type="button" aria-label="缩小叠加图">缩小</button>
+            <button id="comparison-zoom-reset" class="range-button" type="button" aria-label="重置叠加图缩放">重置</button>
+          </div>
+        </div>
+        <div class="chart-legend" aria-label="K线图例">
+          <span><i class="legend-compare-a"></i><span id="kline-legend-a">报告 A</span></span>
+          <span><i class="legend-compare-b"></i><span id="kline-legend-b">报告 B</span></span>
+          <span><i class="legend-baseline"></i>首根收盘价 100</span>
+        </div>
+        <div id="kline-chart-shell" class="comparison-chart-shell">
+          <canvas id="overlay-kline-chart" class="financial-canvas comparison-canvas" tabindex="0" role="img" aria-label="两组历史报告归一化 K 线叠加图"></canvas>
+          <div id="kline-tooltip" class="chart-tooltip" hidden></div>
+        </div>
+        <p id="kline-summary" class="sr-chart-summary"></p>
+      </section>
+
+      <section class="panel report-panel compare-chart-panel" aria-labelledby="return-title">
+        <div class="profit-chart-header">
+          <div>
+            <p class="section-kicker">RETURN OVERLAY</p>
+            <h2 id="return-title">网格收益轨迹叠加</h2>
+          </div>
+          <div class="chart-legend" aria-label="收益曲线图例">
+            <span><i class="legend-compare-a-line"></i><span id="return-legend-a">报告 A</span></span>
+            <span><i class="legend-compare-b-line"></i><span id="return-legend-b">报告 B</span></span>
+          </div>
+        </div>
+        <div id="return-chart-shell" class="comparison-chart-shell">
+          <canvas id="overlay-return-chart" class="financial-canvas comparison-return-canvas" tabindex="0" role="img" aria-label="两组历史报告网格收益轨迹叠加图"></canvas>
+          <div id="return-tooltip" class="chart-tooltip" hidden></div>
+        </div>
+        <p id="return-summary" class="sr-chart-summary"></p>
+      </section>
+
+      <section class="panel report-panel" aria-labelledby="metrics-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">METRIC REVIEW</p>
+            <h2 id="metrics-title">关键指标横向对比</h2>
+          </div>
+        </div>
+        <div id="comparison-metrics" class="comparison-metric-grid"></div>
+      </section>
+    </section>
+  </main>
+
+  <footer>非交易所官方行情 · 仅供策略研究 · 不构成投资建议</footer>
+  <script src="/compare.js" defer></script>
+</body>
+</html>
