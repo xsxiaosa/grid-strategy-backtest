@@ -120,21 +120,19 @@ def create_runtime_directories(package_directory: Path) -> None:
     """
 
     data_directory = package_directory / "data"
-    for child in ("market", "reports", "optimizations", "optimization"):
+    for child in ("market", "reports", "optimizations"):
         (data_directory / child).mkdir(parents=True, exist_ok=True)
     (package_directory / "README.txt").write_text(
         "网格策略回测\n\n"
         "启动网页服务：\n"
         f"  {('grid-backtest.exe' if get_platform_name() == 'windows' else './grid-backtest')}\n\n"
-        "命令行优化器：\n"
-        f"  {('grid-optimizer.exe' if get_platform_name() == 'windows' else './grid-optimizer')} --help\n\n"
         "运行数据保存在本目录的 data 文件夹中。\n",
         encoding="utf-8",
     )
 
 
 def smoke_test(package_directory: Path) -> None:
-    """启动两个打包入口并验证基本可用性。
+    """启动网页回测入口并验证基本可用性。
 
     Args:
         package_directory: 当前平台目录包根目录。
@@ -145,27 +143,6 @@ def smoke_test(package_directory: Path) -> None:
 
     executable_suffix = ".exe" if get_platform_name() == "windows" else ""
     server_executable = package_directory / "grid-backtest" / f"grid-backtest{executable_suffix}"
-    optimizer_executable = package_directory / "grid-optimizer" / f"grid-optimizer{executable_suffix}"
-    optimizer_result = subprocess.run(
-        [str(optimizer_executable), "--help"],
-        cwd=package_directory,
-        capture_output=True,
-        check=False,
-        encoding="utf-8",
-        errors="replace",
-        text=True,
-    )
-    if optimizer_result.returncode != 0:
-        # 自检失败时保留冻结程序的输出，否则 CI 日志只有一个无诊断价值的退出码。
-        diagnostic_output = "\n".join(
-            output for output in (optimizer_result.stdout, optimizer_result.stderr) if output
-        ).strip()
-        raise RuntimeError(
-            "打包后的命令行优化器 --help 失败，"
-            f"退出码为 {optimizer_result.returncode}。\n"
-            f"{diagnostic_output or '优化器没有输出诊断信息。'}"
-        )
-
     process = subprocess.Popen([str(server_executable)], cwd=package_directory, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 20
@@ -211,7 +188,7 @@ def create_archive(package_directory: Path, output_directory: Path) -> Path:
 
 
 def build_package(output_directory: Path) -> Path:
-    """构建当前平台的两个入口、运行目录和压缩包。
+    """构建当前平台的网页入口、运行目录和压缩包。
 
     Args:
         output_directory: 构建产物输出目录。
@@ -231,7 +208,6 @@ def build_package(output_directory: Path) -> Path:
         shutil.rmtree(work_directory)
     package_directory.mkdir(parents=True, exist_ok=True)
     run_pyinstaller("start.py", "grid-backtest", package_directory, work_directory)
-    run_pyinstaller("optimize_strategy.py", "grid-optimizer", package_directory, work_directory)
     create_runtime_directories(package_directory)
     smoke_test(package_directory)
     archive_path = create_archive(package_directory, output_directory)

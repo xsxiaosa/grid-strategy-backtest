@@ -22,8 +22,8 @@ class RuntimePathTests(unittest.TestCase):
         self.assertEqual(get_application_directory(), project_directory)
         self.assertEqual(get_data_directory(), project_directory / "data")
 
-    def test_frozen_runtime_shares_data_between_entrypoints(self) -> None:
-        """两个目录包入口应共享压缩包根目录下的 data 目录。"""
+    def test_frozen_runtime_uses_package_data_directory(self) -> None:
+        """网页目录包入口应将运行数据保存到压缩包根目录下的 data 目录。"""
 
         with tempfile.TemporaryDirectory() as directory:
             package_directory = Path(directory) / "grid-strategy-backtest-windows-x64"

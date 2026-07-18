@@ -47,8 +47,8 @@ def get_application_directory() -> Path:
     """
 
     if getattr(sys, "frozen", False):
-        # PyInstaller 目录包将网页服务和优化器分别放在根目录下的子目录中，
-        # 向上一级后才能让两个入口共享同一套 data 运行数据。
+        # PyInstaller 目录包将网页服务放在根目录下的子目录中，向上一级
+        # 后才能让程序把运行期数据保存到发布包根目录的 data 文件夹。
         return Path(sys.executable).resolve().parent.parent
     return Path(__file__).resolve().parent.parent
 

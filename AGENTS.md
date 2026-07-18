@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Core Python code lives in `grid_backtest/`. Keep strategy execution in `engine.py`, configuration models in `config.py`, market retrieval in `market_data.py`, persistence in `storage.py`, orchestration in `service.py`, and HTTP handling in `web_server.py`. Entry points are `start.py` for the local application and `optimize_strategy.py` for legacy command-line optimization. Browser assets are plain HTML, CSS, and JavaScript under `web/`. Tests live in `tests/` and mirror the modules they cover. Runtime JSON and generated CSV files belong under `data/`; avoid committing incidental reports or caches unless they are intentional fixtures.
+Core Python code lives in `grid_backtest/`. Keep strategy execution in `engine.py`, configuration models in `config.py`, market retrieval in `market_data.py`, persistence in `storage.py`, orchestration in `service.py`, and HTTP handling in `web_server.py`. The entry point is `start.py` for the local application; parameter optimization is provided by the web page at `/optimizer.html`. Browser assets are plain HTML, CSS, and JavaScript under `web/`. Tests live in `tests/` and mirror the modules they cover. Runtime JSON files belong under `data/`; avoid committing incidental reports or caches unless they are intentional fixtures.
 
 ## Build, Test, and Development Commands
 
@@ -11,7 +11,6 @@ The project requires Python 3.11+ and only the standard library; do not add npm 
 - `python start.py` — start the local server at `http://127.0.0.1:8765`.
 - `python -m unittest discover -s tests -v` — run the complete test suite.
 - `python -m unittest tests.test_engine -v` — run one focused test module.
-- `python optimize_strategy.py` — execute the legacy cached-data parameter search and write CSV output under `data/optimization/`.
 
 No separate build step is required.
 
