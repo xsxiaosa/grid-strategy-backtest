@@ -100,6 +100,16 @@
 
     <div id="optimizer-message" role="status" aria-live="polite"></div>
 
+    <!-- 历史区只展示轻量摘要，用户明确选择后再读取完整结果，避免页面初始化传输冗余数据。 -->
+    <section class="panel history-panel optimizer-history-panel" aria-labelledby="optimizer-history-title">
+      <div class="section-heading">
+        <div><p class="section-kicker">HISTORY</p><h2 id="optimizer-history-title">导入历史</h2></div>
+        <button id="refresh-history-button" class="button secondary" type="button">刷新历史</button>
+      </div>
+      <p class="muted optimizer-history-help">导入本机已保存的优化记录，可还原当时的搜索条件并查看最好与最差结果。</p>
+      <div id="optimizer-history" class="history-list"><p class="muted">正在读取历史优化记录……</p></div>
+    </section>
+
     <section id="progress-panel" class="panel progress-panel" hidden aria-labelledby="progress-title">
       <div class="progress-heading">
         <div><p class="section-kicker">LIVE PROGRESS</p><h2 id="progress-title">正在准备</h2></div>

@@ -18,6 +18,7 @@ from grid_backtest.optimization import (
     build_neighborhood_candidates,
     best_sort_key,
     estimate_max_combinations,
+    merge_extremes,
     normalize_parameter,
     select_diverse_results,
     select_extremes,
@@ -197,6 +198,26 @@ class SummaryAndRankingTests(unittest.TestCase):
         best, worst = select_extremes([result(1.0, 1.0, 1, 1.0, 1)], limit=10)
         self.assertEqual(1, len(best))
         self.assertEqual(1, len(worst))
+
+    def test_incremental_extremes_match_full_ranking(self) -> None:
+        """分批增量维护的两端排名必须与累计结果全量排序完全一致。"""
+
+        values = [
+            result(float(index % 7), float((index * 3) % 11), index % 9, float(index % 5), index)
+            for index in range(37)
+        ]
+        incremental_best: list[dict] = []
+        incremental_worst: list[dict] = []
+        for batch_start in range(0, len(values), 4):
+            incremental_best, incremental_worst = merge_extremes(
+                incremental_best,
+                incremental_worst,
+                values[batch_start:batch_start + 4],
+            )
+
+        expected_best, expected_worst = select_extremes(values)
+        self.assertEqual(expected_best, incremental_best)
+        self.assertEqual(expected_worst, incremental_worst)
 
 
 class OptimizationManagerTests(unittest.TestCase):

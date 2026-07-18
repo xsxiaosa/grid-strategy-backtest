@@ -77,6 +77,145 @@ class YahooMinuteMarketDataProvider:
                 return cached, [warning]
             raise RuntimeError(f"分钟行情获取失败且没有可用 JSON 缓存：{error}") from error
 
+    def fetch_daily_indicators(self, symbol: str) -> dict[str, Any]:
+        """获取证券日线并计算页面输入区需要的均线指标。
+
+        该方法使用最近日线收盘价计算 MA5、MA20、MA60 和 EMA60，用于在用户
+        输入证券代码后快速展示当前价格位置。EMA60 使用全部返回日线递推，
+        平滑系数为 ``2 / (60 + 1)``。
+
+        Args:
+            symbol: 六位沪深证券代码。
+
+        Returns:
+            包含证券名称、最新交易日、最新价、涨跌幅和各周期均线的 JSON 对象。
+
+        Raises:
+            RuntimeError: Yahoo 请求失败或有效日线少于 60 根时抛出。
+        """
+
+        yahoo_symbol = self._to_yahoo_symbol(symbol)
+        requested_at = datetime.now(timezone.utc)
+        # 取 400 个自然日，充分覆盖 60 个交易日及长假、停牌等缺口。
+        parameters = urllib.parse.urlencode({
+            "interval": "1d",
+            "period1": int((requested_at - timedelta(days=400)).timestamp()),
+            "period2": int((requested_at + timedelta(days=1)).timestamp()),
+            "includePrePost": "false",
+            "events": "div,splits",
+        })
+        payload = self._request_chart(yahoo_symbol, parameters)
+        results = payload.get("chart", {}).get("result") or []
+        if not results:
+            raise RuntimeError("行情源没有返回日线数据")
+        item = results[0]
+        timestamps = item.get("timestamp") or []
+        quotes = item.get("indicators", {}).get("quote") or []
+        closes = quotes[0].get("close", []) if quotes else []
+        daily_closes = [
+            (int(timestamp), float(close))
+            for timestamp, close in zip(timestamps, closes)
+            if isinstance(timestamp, (int, float)) and isinstance(close, (int, float)) and close > 0
+        ]
+        if len(daily_closes) < 60:
+            raise RuntimeError(f"有效日线仅 {len(daily_closes)} 根，不足以计算 MA60 和 EMA60")
+        close_values = [close for _, close in daily_closes]
+        latest_price = close_values[-1]
+        previous_close = close_values[-2]
+        meta = item.get("meta", {})
+        ma60 = self._simple_moving_average(close_values, 60)
+        return {
+            "symbol": symbol,
+            "name": meta.get("longName") or meta.get("shortName") or symbol,
+            "as_of": datetime.fromtimestamp(daily_closes[-1][0], SHANGHAI_TIMEZONE).date().isoformat(),
+            "latest_price": round(latest_price, 4),
+            "change_percent": round((latest_price - previous_close) / previous_close * 100, 2),
+            "ma5": round(self._simple_moving_average(close_values, 5), 4),
+            "ma20": round(self._simple_moving_average(close_values, 20), 4),
+            "ma60": round(ma60, 4),
+            "ema60": round(self._exponential_moving_average(close_values, 60), 4),
+            "ma60_deviation_percent": round((latest_price - ma60) / ma60 * 100, 2),
+            "source": "Yahoo Finance Chart API（非交易所官方行情）",
+        }
+
+    def _request_chart(self, yahoo_symbol: str, parameters: str) -> dict[str, Any]:
+        """使用已编码的参数请求 Yahoo Chart API，并在瞬时故障时重试。
+
+        Args:
+            yahoo_symbol: 带沪深市场后缀的 Yahoo 证券代码。
+            parameters: 已经通过 URL 编码的 Chart API 查询参数。
+
+        Returns:
+            已解析且确认不含 Chart 错误的 JSON 根对象。
+
+        Raises:
+            RuntimeError: 三次请求均失败或上游返回业务错误时抛出。
+        """
+
+        errors: list[str] = []
+        # query1 与 query2 返回相同 Chart 数据，交替请求可绕开单节点瞬时故障。
+        for attempt in range(3):
+            host = "query1.finance.yahoo.com" if attempt % 2 == 0 else "query2.finance.yahoo.com"
+            url = f"https://{host}/v8/finance/chart/{urllib.parse.quote(yahoo_symbol)}?{parameters}"
+            request = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 grid-strategy-backtest/1.0",
+                "Accept": "application/json",
+            })
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                    payload = json.load(response)
+                chart_error = payload.get("chart", {}).get("error")
+                if chart_error:
+                    raise RuntimeError(str(chart_error.get("description") or chart_error))
+                return payload
+            except (urllib.error.URLError, urllib.error.HTTPError, RuntimeError, json.JSONDecodeError) as error:
+                errors.append(f"第 {attempt + 1} 次：{error}")
+                if attempt < 2:
+                    time.sleep(0.4 * (attempt + 1))
+        raise RuntimeError("；".join(errors))
+
+    @staticmethod
+    def _simple_moving_average(values: list[float], period: int) -> float:
+        """计算最近指定周期的简单移动平均值。
+
+        Args:
+            values: 按时间升序排列的有效收盘价。
+            period: 需要纳入平均的末尾交易日数。
+
+        Returns:
+            最近 ``period`` 个收盘价的算术平均值。
+
+        Raises:
+            ValueError: 周期非正数或价格数量不足时抛出。
+        """
+
+        if period <= 0 or len(values) < period:
+            raise ValueError("移动平均周期必须为正数且不超过价格数量")
+        return sum(values[-period:]) / period
+
+    @staticmethod
+    def _exponential_moving_average(values: list[float], period: int) -> float:
+        """计算以首个收盘价为种子值的指数移动平均值。
+
+        Args:
+            values: 按时间升序排列的有效收盘价。
+            period: EMA 的平滑周期，本页使用 60 个交易日。
+
+        Returns:
+            逐点递推至最新交易日的 EMA 值。
+
+        Raises:
+            ValueError: 收盘价为空或周期非正数时抛出。
+        """
+
+        if not values or period <= 0:
+            raise ValueError("EMA 价格数组不得为空且周期必须为正数")
+        multiplier = 2 / (period + 1)
+        ema = values[0]
+        for value in values[1:]:
+            ema = (value - ema) * multiplier + ema
+        return ema
+
     def _download(self, symbol: str, days: int) -> dict[str, Any]:
         """将完整周期拆成六天片段并合并去重分钟行情。
 

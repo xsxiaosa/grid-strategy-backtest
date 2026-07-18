@@ -187,6 +187,32 @@ class JsonStorage:
                 results.append(result)
         return results
 
+    def list_optimization_summaries(self, limit: int = 20) -> list[dict[str, Any]]:
+        """按时间倒序生成可供优化页面导入查看的历史任务摘要。
+
+        Args:
+            limit: 最多读取和返回的历史优化任务数量。
+
+        Returns:
+            包含任务编号、时间、证券、评估数量和最优收益率的轻量摘要列表。
+        """
+
+        summaries: list[dict[str, Any]] = []
+        for result in self.list_optimizations(limit):
+            best_results = result.get("best")
+            best_result = best_results[0] if isinstance(best_results, list) and best_results else {}
+            config = result.get("config") if isinstance(result.get("config"), dict) else {}
+            summaries.append({
+                "job_id": result.get("job_id"),
+                "created_at": result.get("created_at"),
+                "symbol": config.get("symbol"),
+                "completed": result.get("completed"),
+                "elapsed_seconds": result.get("elapsed_seconds"),
+                "best_return_percent": best_result.get("return_percent"),
+                "status": result.get("status"),
+            })
+        return summaries
+
     @staticmethod
     def _read_json(path: Path) -> dict[str, Any] | None:
         """读取单个 UTF-8 JSON 对象文件。

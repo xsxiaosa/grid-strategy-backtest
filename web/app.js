@@ -3,6 +3,7 @@
 
 const form = document.querySelector("#strategy-form");
 const runButton = document.querySelector("#run-button");
+const copyToOptimizerButton = document.querySelector("#copy-to-optimizer-button");
 const resetButton = document.querySelector("#reset-button");
 const copyJsonButton = document.querySelector("#copy-json-button");
 const restoreJsonButton = document.querySelector("#restore-json-button");
@@ -13,7 +14,12 @@ const confirmRestoreButton = document.querySelector("#confirm-restore-button");
 const message = document.querySelector("#message");
 const reportContainer = document.querySelector("#report");
 const historyContainer = document.querySelector("#history");
+const symbolInput = document.querySelector("#symbol-input");
+const marketIndicatorCard = document.querySelector("#market-indicator-card");
 let activeChartCleanups = [];
+let indicatorRequestSequence = 0;
+let indicatorDebounceTimer = null;
+const PENDING_OPTIMIZER_CONFIG_STORAGE_KEY = "grid-backtest-pending-optimizer-config";
 
 /** 内置指定方案，用于用户主动恢复，不会覆盖服务端最近保存配置。 */
 const DEFAULT_CONFIG = {
@@ -49,6 +55,133 @@ function fillForm(config) {
     const control = form.elements.namedItem(name);
     if (control) control.value = String(value);
   });
+  scheduleMarketIndicatorLoad();
+}
+
+/**
+ * 将行情指标数值格式化为最多四位小数，并保留较小价格的辨识度。
+ *
+ * @param {number} value 最新价或均线原始数值。
+ * @returns {string} 不含无意义末尾零的本地化数字。
+ */
+function indicatorPrice(value) {
+  return Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+}
+
+/**
+ * 清空指标卡并显示加载、输入提示或错误文本。
+ *
+ * @param {string} text 需要向用户展示的中文状态。
+ * @param {"normal"|"error"} [kind] 状态的视觉类型。
+ * @returns {void}
+ */
+function showIndicatorStatus(text, kind = "normal") {
+  const status = document.createElement("div");
+  status.className = `indicator-placeholder${kind === "error" ? " error" : ""}`;
+  status.textContent = text;
+  marketIndicatorCard.replaceChildren(status);
+}
+
+/**
+ * 使用语义化文本创建单个指标值，避免仅依赖红绿颜色表达涨跌。
+ *
+ * @param {string} label 指标名称。
+ * @param {string} value 已格式化的指标数值。
+ * @param {string} [valueClass] 可选的涨跌语义样式。
+ * @returns {HTMLElement} 可放入指标摘要网格的项目。
+ */
+function createIndicatorItem(label, value, valueClass = "") {
+  const item = document.createElement("div");
+  item.className = "indicator-item";
+  const strong = document.createElement("strong");
+  strong.className = valueClass;
+  strong.textContent = value;
+  const span = document.createElement("span");
+  span.textContent = label;
+  item.append(strong, span);
+  return item;
+}
+
+/**
+ * 把服务端返回的最新日线与均线渲染到证券代码右侧。
+ *
+ * @param {object} indicators 行情指标 API 返回的完整对象。
+ * @returns {void}
+ */
+function renderMarketIndicators(indicators) {
+  const summary = document.createElement("div");
+  summary.className = "indicator-summary";
+  const identity = document.createElement("div");
+  identity.className = "indicator-identity";
+  const name = document.createElement("strong");
+  name.title = indicators.name;
+  name.textContent = `${indicators.symbol} ${indicators.name}`;
+  const date = document.createElement("span");
+  const positionText = `${indicators.ma60_deviation_percent >= 0 ? "高于" : "低于"} MA60 ${Math.abs(indicators.ma60_deviation_percent).toFixed(2)}%`;
+  date.textContent = `日线截至 ${indicators.as_of} · ${positionText}`;
+  identity.append(name, date);
+
+  const changeSign = indicators.change_percent > 0 ? "+" : "";
+  const changeClass = indicators.change_percent > 0 ? "positive" : indicators.change_percent < 0 ? "negative" : "";
+  summary.append(
+    identity,
+    createIndicatorItem("最新价", indicatorPrice(indicators.latest_price)),
+    createIndicatorItem("日涨跌", `${changeSign}${indicators.change_percent.toFixed(2)}%`, changeClass),
+    createIndicatorItem("MA5", indicatorPrice(indicators.ma5)),
+    createIndicatorItem("MA20", indicatorPrice(indicators.ma20)),
+    createIndicatorItem("MA60", indicatorPrice(indicators.ma60)),
+    createIndicatorItem("EMA60", indicatorPrice(indicators.ema60))
+  );
+  marketIndicatorCard.replaceChildren(summary);
+}
+
+/**
+ * 在代码输入完整后请求日线指标，并忽略较早请求的过期响应。
+ *
+ * @returns {Promise<void>} 最新输入对应的指标已显示或错误已反馈后结束。
+ */
+async function loadMarketIndicators() {
+  const symbol = symbolInput.value.trim();
+  const requestSequence = ++indicatorRequestSequence;
+  if (!/^\d{6}$/.test(symbol)) {
+    marketIndicatorCard.setAttribute("aria-busy", "false");
+    showIndicatorStatus("输入六位证券代码后自动读取 MA60、EMA60 等日线指标");
+    return;
+  }
+  marketIndicatorCard.setAttribute("aria-busy", "true");
+  showIndicatorStatus(`正在读取 ${symbol} 的日线指标…`);
+  try {
+    const indicators = await requestJson(`/api/market-indicators?symbol=${encodeURIComponent(symbol)}`);
+    if (requestSequence !== indicatorRequestSequence) return;
+    renderMarketIndicators(indicators);
+  } catch (error) {
+    if (requestSequence !== indicatorRequestSequence) return;
+    showIndicatorStatus(`指标读取失败：${error.message}`, "error");
+  } finally {
+    if (requestSequence === indicatorRequestSequence) marketIndicatorCard.setAttribute("aria-busy", "false");
+  }
+}
+
+/**
+ * 对连续代码输入做短延时合并，避免用户尚未输完就频繁请求行情。
+ *
+ * @returns {void}
+ */
+function scheduleMarketIndicatorLoad() {
+  window.clearTimeout(indicatorDebounceTimer);
+  // 输入一旦变化就立即使旧请求失效，避免短暂显示上一个证券的指标。
+  indicatorRequestSequence += 1;
+  indicatorDebounceTimer = window.setTimeout(() => void loadMarketIndicators(), 450);
+}
+
+/**
+ * 证券代码输入失去焦点时取消延时任务，并立即加载最新代码。
+ *
+ * @returns {void}
+ */
+function loadMarketIndicatorsOnBlur() {
+  window.clearTimeout(indicatorDebounceTimer);
+  void loadMarketIndicators();
 }
 
 /**
@@ -62,6 +195,33 @@ function readForm() {
     if (name !== "symbol") values[name] = Number(values[name]);
   });
   return values;
+}
+
+/**
+ * 校验当前回测表单，将完整方案临时传给参数优化页并在新标签中打开。
+ *
+ * 四个信号参数保留在基础配置中，参数优化器会把它们作为当前候选参与搜索；
+ * 优化范围仍由优化页单独控制，避免把单值方案错误转换为零宽搜索区间。
+ *
+ * @returns {void}
+ */
+function copySchemeToOptimizer() {
+  if (!form.reportValidity()) return;
+  copyToOptimizerButton.disabled = true;
+  try {
+    localStorage.setItem(PENDING_OPTIMIZER_CONFIG_STORAGE_KEY, JSON.stringify(readForm()));
+    // 使用临时同源链接继承浏览器原生的新标签行为，同时隔离新页面的 opener。
+    const link = document.createElement("a");
+    link.href = "/optimizer.html";
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.click();
+    showMessage("方案已复制，参数优化页面已在新标签中打开。", "normal");
+  } catch (error) {
+    showMessage(`方案复制失败：${error.message}`, "error");
+  } finally {
+    copyToOptimizerButton.disabled = false;
+  }
 }
 
 /**
@@ -884,7 +1044,10 @@ async function initialize() {
 }
 
 resetButton.addEventListener("click", () => fillForm(DEFAULT_CONFIG));
+symbolInput.addEventListener("input", scheduleMarketIndicatorLoad);
+symbolInput.addEventListener("blur", loadMarketIndicatorsOnBlur);
 copyJsonButton.addEventListener("click", () => void copyParametersAsJson());
+copyToOptimizerButton.addEventListener("click", copySchemeToOptimizer);
 restoreJsonButton.addEventListener("click", openJsonRestoreDialog);
 confirmRestoreButton.addEventListener("click", restoreParametersFromJson);
 form.addEventListener("submit", async (event) => {

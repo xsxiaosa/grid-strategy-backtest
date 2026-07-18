@@ -34,6 +34,25 @@ class BacktestService:
         saved = self.storage.read_config()
         return StrategyConfig.from_dict(saved).to_dict()
 
+    def get_market_indicators(self, symbol: str) -> dict[str, Any]:
+        """校验证券代码并返回页面输入区使用的日线均线摘要。
+
+        Args:
+            symbol: 网页查询参数中的六位沪深证券代码。
+
+        Returns:
+            包含证券名称、最新价、涨跌幅、MA 和 EMA 的指标对象。
+
+        Raises:
+            ValueError: 证券代码不是六位数字时抛出。
+            RuntimeError: 日线行情不可用或数量不足时抛出。
+        """
+
+        normalized_symbol = str(symbol).strip()
+        if len(normalized_symbol) != 6 or not normalized_symbol.isdigit():
+            raise ValueError("证券代码必须是六位数字")
+        return self.market_provider.fetch_daily_indicators(normalized_symbol)
+
     def run(self, raw_config: dict[str, Any] | None) -> dict[str, Any]:
         """校验方案、获取行情、计算结果并保存完整 JSON 报告。
 
@@ -78,4 +97,3 @@ class BacktestService:
         """
 
         return self.storage.read_report(report_id)
-

@@ -18,7 +18,8 @@
     <div class="hero-actions">
       <nav class="page-nav" aria-label="主要页面">
         <a class="nav-link active" href="/index.html" aria-current="page">普通回测</a>
-        <a class="nav-link" href="/optimizer.html">参数优化</a>
+        <!-- 参数优化是可并行使用的长任务页面，新标签打开可保留当前回测表单与报告。 -->
+        <a class="nav-link" href="/optimizer.html" target="_blank" rel="noopener">参数优化</a>
       </nav>
       <div class="storage-badge"><span></span>JSON 存储 · 无数据库</div>
     </div>
@@ -103,7 +104,11 @@
       </div>
       <form id="strategy-form">
         <div class="form-grid">
-          <label>证券代码<input id="symbol-input" name="symbol" inputmode="numeric" maxlength="6" required></label>
+          <label>证券代码<input id="symbol-input" name="symbol" inputmode="numeric" maxlength="6" autocomplete="off" required></label>
+          <!-- 指标卡保留固定布局空间，代码输入完整后就地显示日线均线。 -->
+          <aside id="market-indicator-card" class="market-indicator-card" aria-live="polite" aria-busy="false">
+            <div class="indicator-placeholder">输入六位证券代码后自动读取 MA60、EMA60 等日线指标</div>
+          </aside>
           <label>有效期（自然日）<input id="days-input" name="days" type="number" min="1" max="30" step="1" required></label>
           <label>监控下限<input id="lower-bound-input" name="lower_bound" type="number" min="0.001" step="0.001" required></label>
           <label>监控上限<input id="upper-bound-input" name="upper_bound" type="number" min="0.001" step="0.001" required></label>
@@ -124,7 +129,11 @@
         </div>
         <div class="form-footer">
           <p>行情与每次结果会自动保存到本项目的 <code>data</code> 目录。</p>
-          <button id="run-button" class="button primary" type="submit">提取行情并开始回测</button>
+          <!-- 方案复制是次要操作，与主回测按钮并列但保持清晰的视觉层级。 -->
+          <div class="form-actions">
+            <button id="copy-to-optimizer-button" class="button secondary" type="button">复制方案到参数优化</button>
+            <button id="run-button" class="button primary" type="submit">提取行情并开始回测</button>
+          </div>
         </div>
       </form>
       <!-- 参数还原使用原生对话框，支持键盘焦点管理和 Esc 取消操作。 -->

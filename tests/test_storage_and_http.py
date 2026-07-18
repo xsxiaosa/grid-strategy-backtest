@@ -30,6 +30,30 @@ class FixedMarketProvider:
             bars.append({"timestamp": f"2026-07-01T09:{30 + index:02d}:00+08:00", "open": close, "high": close + 0.002, "low": close - 0.002, "close": close, "volume": 1000})
         return {"symbol": config.symbol, "name": "测试 ETF", "source": "TEST", "timezone": "Asia/Shanghai", "fetched_at": "2026-07-01T01:30:00+00:00", "bars": bars}, []
 
+    def fetch_daily_indicators(self, symbol: str) -> dict:
+        """返回无需联网的固定日线均线摘要。
+
+        Args:
+            symbol: HTTP 查询提供的六位证券代码。
+
+        Returns:
+            字段与正式指标接口一致的固定 JSON 对象。
+        """
+
+        return {
+            "symbol": symbol,
+            "name": "测试 ETF",
+            "as_of": "2026-07-17",
+            "latest_price": 1.8,
+            "change_percent": 1.2,
+            "ma5": 1.75,
+            "ma20": 1.7,
+            "ma60": 1.65,
+            "ema60": 1.66,
+            "ma60_deviation_percent": 9.09,
+            "source": "TEST",
+        }
+
 
 class JsonStorageTests(unittest.TestCase):
     """验证配置、缓存和报告均使用普通 JSON 文件。"""
@@ -42,9 +66,13 @@ class JsonStorageTests(unittest.TestCase):
             storage.write_config({"symbol": "588000"})
             storage.write_market("588000", 30, {"bars": [{"close": 1.74}, {"close": 1.75}]})
             storage.write_report("report-1", {"report_id": "report-1", "market_data": {"symbol": "588000"}, "grid": {"profit": 1}, "buy_and_hold": {"profit": 0}, "comparison": {"winner": "GRID"}})
+            storage.write_optimization("opt-1", {"job_id": "opt-1", "created_at": "2026-07-18T00:00:00+00:00", "status": "completed", "completed": 100, "config": {"symbol": "588000"}, "best": [{"return_percent": 3.25}]})
             self.assertEqual("588000", storage.read_config()["symbol"])
             self.assertEqual(2, len(storage.read_market("588000", 30)["bars"]))
             self.assertEqual("report-1", storage.read_report("report-1")["report_id"])
+            optimization_summary = storage.list_optimization_summaries()[0]
+            self.assertEqual("opt-1", optimization_summary["job_id"])
+            self.assertEqual(3.25, optimization_summary["best_return_percent"])
             self.assertFalse(any(Path(directory).rglob("*.sqlite")))
 
 
@@ -67,9 +95,32 @@ class HttpServerTests(unittest.TestCase):
                 with urllib.request.urlopen(base_url + "/optimizer.html", timeout=5) as response:
                     optimizer_page = response.read().decode("utf-8")
                 self.assertIn("网格策略回测", homepage)
+                self.assertIn('href="/optimizer.html" target="_blank" rel="noopener"', homepage)
+                self.assertIn('id="copy-to-optimizer-button"', homepage)
+                self.assertIn("复制方案到参数优化", homepage)
                 self.assertIn("四参数迭代优化", optimizer_page)
                 self.assertEqual("588000", config["symbol"])
                 self.assertEqual(30, config["days"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_gets_market_indicators_for_valid_symbol(self) -> None:
+        """六位证券代码应通过 GET 接口返回 MA60 和 EMA60 等摘要。"""
+
+        with tempfile.TemporaryDirectory() as directory:
+            server = create_server(port=0, data_directory=Path(directory))
+            server.RequestHandlerClass.service.market_provider = FixedMarketProvider()
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = f"http://127.0.0.1:{server.server_address[1]}/api/market-indicators?symbol=588000"
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    indicators = json.load(response)
+                self.assertEqual("588000", indicators["symbol"])
+                self.assertEqual(1.65, indicators["ma60"])
+                self.assertEqual(1.66, indicators["ema60"])
             finally:
                 server.shutdown()
                 server.server_close()
@@ -116,6 +167,11 @@ class HttpServerTests(unittest.TestCase):
                 self.assertEqual(1, snapshot["completed"])
                 self.assertEqual(1, len(snapshot["best"]))
                 self.assertTrue(list((data_directory / "optimizations").glob("*.json")))
+                with urllib.request.urlopen(base_url + "/api/optimizations", timeout=5) as response:
+                    history = json.load(response)
+                self.assertEqual(created["job_id"], history["data"][0]["job_id"])
+                self.assertEqual("588000", history["data"][0]["symbol"])
+                self.assertEqual(snapshot["best"][0]["return_percent"], history["data"][0]["best_return_percent"])
             finally:
                 server.shutdown()
                 server.server_close()

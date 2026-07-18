@@ -17,11 +17,15 @@ const bestTableContainer = document.querySelector("#best-table");
 const worstTableContainer = document.querySelector("#worst-table");
 const coarseValueLimitInput = document.querySelector("#coarse-value-limit");
 const coarseCombinationCount = document.querySelector("#coarse-combination-count");
+const historyContainer = document.querySelector("#optimizer-history");
+const refreshHistoryButton = document.querySelector("#refresh-history-button");
 const CURRENT_JOB_STORAGE_KEY = "grid-backtest-current-optimization-job";
+const PENDING_OPTIMIZER_CONFIG_STORAGE_KEY = "grid-backtest-pending-optimizer-config";
 
 let baseConfig = null;
 let currentJobId = null;
 let pollTimer = null;
+let isRunning = false;
 
 /**
  * 调用本机 JSON API，并将非成功响应转换为可直接展示的中文错误。
@@ -90,6 +94,28 @@ function forgetCurrentJob() {
 }
 
 /**
+ * 读取并消费普通回测页临时复制的完整策略方案。
+ *
+ * @returns {object|null} 合法的策略对象；没有待导入方案或读取失败时返回 null。
+ */
+function takeCopiedBacktestConfig() {
+  try {
+    const text = localStorage.getItem(PENDING_OPTIMIZER_CONFIG_STORAGE_KEY);
+    if (!text) return null;
+    // 读取后立即删除，确保刷新或以后打开优化页时不会重复覆盖当前设置。
+    localStorage.removeItem(PENDING_OPTIMIZER_CONFIG_STORAGE_KEY);
+    const config = JSON.parse(text);
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      throw new Error("复制的方案不是有效参数对象");
+    }
+    return config;
+  } catch (error) {
+    console.warn("无法读取普通回测页复制的方案", error);
+    return null;
+  }
+}
+
+/**
  * 在页面状态区域显示普通、加载或错误消息。
  *
  * @param {string} text 需要展示的中文说明；空字符串会清空区域。
@@ -141,6 +167,29 @@ function fillTaskSettings(snapshot) {
     coarseValueLimitInput.value = snapshot.coarse_value_limit;
     renderCoarseCombinationCount();
   }
+}
+
+/**
+ * 扩展四个优化范围以包含普通回测方案中的当前信号参数。
+ *
+ * @param {object} config 普通回测页复制的完整策略配置。
+ * @returns {void}
+ */
+function includeCopiedSignalsInRanges(config) {
+  const rangeInputs = {
+    rise_trigger_percent: ["#rise-min", "#rise-max"],
+    sell_pullback_percent: ["#sell-min", "#sell-max"],
+    fall_trigger_percent: ["#fall-min", "#fall-max"],
+    buy_rebound_percent: ["#buy-min", "#buy-max"]
+  };
+  Object.entries(rangeInputs).forEach(([name, selectors]) => {
+    const value = Number(config[name]);
+    if (!Number.isFinite(value) || value <= 0 || value > 100) return;
+    const minimumInput = document.querySelector(selectors[0]);
+    const maximumInput = document.querySelector(selectors[1]);
+    minimumInput.value = Math.min(Number(minimumInput.value), value);
+    maximumInput.value = Math.max(Number(maximumInput.value), value);
+  });
 }
 
 /**
@@ -225,10 +274,24 @@ function renderCoarseCombinationCount() {
  * @returns {void}
  */
 function setRunning(running) {
+  isRunning = running;
   startButton.disabled = running;
   startButton.textContent = running ? "优化计算中…" : "开始三轮优化";
   cancelButton.hidden = !running;
   form.querySelectorAll("input").forEach((input) => { input.disabled = running; });
+  refreshHistoryButton.disabled = running;
+  historyContainer.querySelectorAll("button").forEach((button) => { button.disabled = running; });
+}
+
+/**
+ * 将 ISO 时间转换为稳定的中文本地日期时间。
+ *
+ * @param {string} value 服务端保存的 ISO 8601 时间。
+ * @returns {string} 可直接展示的本地日期时间；无效值返回短横线。
+ */
+function formatDateTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", { hour12: false });
 }
 
 /**
@@ -353,6 +416,84 @@ function renderResults(snapshot) {
 }
 
 /**
+ * 导入一条已保存的完整优化任务，并还原其表单、统计和结果表格。
+ *
+ * @param {string} jobId 需要读取的历史优化任务编号。
+ * @returns {Promise<void>} 历史结果完成渲染后结束。
+ */
+async function importHistory(jobId) {
+  showMessage("正在导入历史优化结果……", "loading");
+  const snapshot = await requestJson(`/api/optimizations/${encodeURIComponent(jobId)}`);
+  currentJobId = snapshot.job_id;
+  rememberCurrentJob(currentJobId);
+  fillTaskSettings(snapshot);
+  renderProgress(snapshot);
+  resultsContainer.hidden = true;
+  renderResults(snapshot);
+  showMessage(`已导入 ${formatDateTime(snapshot.created_at)} 的优化结果，共评估 ${Number(snapshot.completed).toLocaleString("zh-CN")} 个唯一组合。`);
+  resultsContainer.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}
+
+/**
+ * 创建一条历史优化摘要，并提供明确的导入查看操作。
+ *
+ * @param {object} item 服务端返回的历史优化轻量摘要。
+ * @returns {HTMLElement} 可插入历史列表的摘要行。
+ */
+function createHistoryItem(item) {
+  const row = document.createElement("div");
+  row.className = "history-item optimizer-history-item";
+  const identity = document.createElement("strong");
+  identity.textContent = `${item.symbol || "未知证券"} · ${formatDateTime(item.created_at)}`;
+  const completed = document.createElement("span");
+  completed.textContent = `评估 ${Number(item.completed || 0).toLocaleString("zh-CN")} 组`;
+  const bestReturn = document.createElement("span");
+  bestReturn.textContent = item.best_return_percent == null ? "最优收益 —" : `最优收益 ${formatPercent(item.best_return_percent)}`;
+  const button = document.createElement("button");
+  button.className = "button secondary compact-button";
+  button.type = "button";
+  button.textContent = "导入查看";
+  button.disabled = isRunning;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await importHistory(item.job_id);
+    } catch (error) {
+      showMessage(`历史优化结果导入失败：${error.message}`, "error");
+    } finally {
+      button.disabled = isRunning;
+    }
+  });
+  row.append(identity, completed, bestReturn, button);
+  return row;
+}
+
+/**
+ * 从服务端读取最近的优化摘要并刷新导入历史区域。
+ *
+ * @returns {Promise<void>} 历史列表完成刷新或显示错误后结束。
+ */
+async function loadHistory() {
+  refreshHistoryButton.disabled = true;
+  try {
+    const payload = await requestJson("/api/optimizations");
+    historyContainer.replaceChildren();
+    if (!payload.data.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "尚无已保存的优化结果。完成一次优化后即可在这里导入查看。";
+      historyContainer.append(empty);
+      return;
+    }
+    payload.data.forEach((item) => historyContainer.append(createHistoryItem(item)));
+  } catch (error) {
+    historyContainer.textContent = `历史优化记录读取失败：${error.message}`;
+  } finally {
+    refreshHistoryButton.disabled = isRunning;
+  }
+}
+
+/**
  * 停止轮询并恢复表单操作状态。
  *
  * @returns {void}
@@ -377,6 +518,7 @@ async function pollJob() {
     if (snapshot.status === "completed") {
       stopPolling();
       showMessage(`三轮迭代完成，共评估 ${Number(snapshot.completed).toLocaleString("zh-CN")} 个唯一组合，结果已保存为 JSON。`);
+      await loadHistory();
       resultsContainer.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     } else if (snapshot.status === "cancelled") {
       stopPolling();
@@ -444,8 +586,18 @@ async function restoreCurrentJob() {
 async function initialize() {
   try {
     baseConfig = await requestJson("/api/config");
+    const copiedConfig = takeCopiedBacktestConfig();
+    if (copiedConfig) {
+      baseConfig = { ...baseConfig, ...copiedConfig };
+      fillFixedConfig(baseConfig);
+      includeCopiedSignalsInRanges(baseConfig);
+      showMessage("已复制普通回测方案；四个信号参数将作为当前候选参与范围搜索。", "normal");
+      await loadHistory();
+      return;
+    }
     fillFixedConfig(baseConfig);
     await restoreCurrentJob();
+    await loadHistory();
   } catch (error) {
     showMessage(`无法初始化参数优化页面：${error.message}`, "error");
     startButton.disabled = true;
@@ -478,6 +630,9 @@ form.addEventListener("submit", async (event) => {
 
 // 输入变化时即时反馈粗搜索规模，帮助用户在精度和耗时之间做选择。
 coarseValueLimitInput.addEventListener("input", renderCoarseCombinationCount);
+
+// 刷新按钮允许用户在其他页面或任务刚完成后主动同步本机历史文件。
+refreshHistoryButton.addEventListener("click", loadHistory);
 
 cancelButton.addEventListener("click", async () => {
   if (!currentJobId || !window.confirm("确定取消当前参数优化任务吗？已完成的计算不会写入最终结果文件。")) return;

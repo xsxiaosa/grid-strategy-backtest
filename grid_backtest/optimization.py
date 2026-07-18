@@ -376,6 +376,36 @@ def select_extremes(results: Iterable[dict[str, Any]], limit: int = 10) -> tuple
     return sorted(values, key=best_sort_key)[:limit], sorted(values, key=worst_sort_key)[:limit]
 
 
+def merge_extremes(
+    current_best: Iterable[dict[str, Any]],
+    current_worst: Iterable[dict[str, Any]],
+    new_results: Iterable[dict[str, Any]],
+    limit: int = 10,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把一批新结果增量合并到当前最好与最差排名中。
+
+    已经不在当前两端排名内的旧结果不可能因为加入新结果重新进入任一端，
+    因此只需对旧两端结果与新批次排序。该性质避免粗搜索每完成一个分块就
+    对数十万条累计结果重复执行全量排序，同时保持排名结果完全一致。
+
+    Args:
+        current_best: 上一次更新后保留的最好结果。
+        current_worst: 上一次更新后保留的最差结果。
+        new_results: 本次工作进程返回的新结果批次。
+        limit: 每一端最多保留的结果数量。
+
+    Returns:
+        与对全部累计结果调用 :func:`select_extremes` 等价的最好、最差结果。
+    """
+
+    unique: dict[tuple[float, ...], dict[str, Any]] = {}
+    for result in [*current_best, *current_worst, *new_results]:
+        # 参数元组是优化任务内的候选唯一键，也能消除两端重叠造成的重复。
+        key = tuple(float(result[name]) for name in PARAMETER_NAMES)
+        unique[key] = result
+    return select_extremes(unique.values(), limit)
+
+
 def select_diverse_results(
     results: Iterable[dict[str, Any]],
     sort_key: Any,
@@ -570,6 +600,18 @@ class OptimizationManager:
             return job.snapshot()
         return self.storage.read_optimization(job_id)
 
+    def list_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        """读取最近完成且已持久化的优化任务摘要。
+
+        Args:
+            limit: 页面最多需要展示的历史任务数量。
+
+        Returns:
+            按任务文件名倒序排列的轻量历史摘要列表。
+        """
+
+        return self.storage.list_optimization_summaries(limit)
+
     def cancel(self, job_id: str) -> dict[str, Any] | None:
         """请求取消指定的排队或运行任务。
 
@@ -607,7 +649,8 @@ class OptimizationManager:
                 job.round_name = "正在获取行情"
             LOGGER.info("优化任务开始运行：任务=%s，正在获取并准备分钟行情", job.job_id)
             market, _ = self.market_provider.fetch_recent(job.config)
-            worker_count = max(1, min(8, (os.cpu_count() or 2) - 1))
+            # 为 Web 服务和操作系统固定预留四个逻辑 CPU，其余 CPU 用于并行回测。
+            worker_count = max(1, (os.cpu_count() or 1) - 4)
             LOGGER.info(
                 "优化任务行情准备完成：任务=%s，行情条数=%d，工作进程=%d，耗时=%.2f秒",
                 job.job_id,
@@ -784,6 +827,8 @@ class OptimizationManager:
         stage_completed = 0
         next_log_percent = PROGRESS_LOG_PERCENT_STEP
         last_log_time = stage_started
+        # 上一轮结果只扫描一次；后续分块使用增量排名，避免累计结果反复全量排序。
+        running_best, running_worst = select_extremes(all_results.values())
         for future in as_completed(futures):
             if job.cancel_event.is_set():
                 for pending in futures:
@@ -794,12 +839,12 @@ class OptimizationManager:
                 key = tuple(float(result[name]) for name in PARAMETER_NAMES)
                 all_results[key] = result
             stage_completed += len(chunk_results)
-            best, worst = select_extremes(all_results.values())
+            running_best, running_worst = merge_extremes(running_best, running_worst, chunk_results)
             with job.lock:
                 job.completed = len(all_results)
                 job.elapsed_seconds = time.perf_counter() - started
-                job.best = [public_result(result) for result in best]
-                job.worst = [public_result(result) for result in worst]
+                job.best = [public_result(result) for result in running_best]
+                job.worst = [public_result(result) for result in running_worst]
             progress_percent = 100 if not new_candidates else stage_completed / len(new_candidates) * 100
             current_time = time.perf_counter()
             should_log_progress = (

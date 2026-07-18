@@ -7,7 +7,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .optimization import OptimizationManager
 from .service import BacktestService
@@ -31,9 +31,19 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
             无返回值；响应状态、头和正文直接写入客户端连接。
         """
 
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/api/config":
             self._write_json(HTTPStatus.OK, self.service.get_config())
+            return
+        if path == "/api/market-indicators":
+            symbol = (parse_qs(parsed_url.query).get("symbol") or [""])[0]
+            try:
+                self._write_json(HTTPStatus.OK, self.service.get_market_indicators(symbol))
+            except ValueError as error:
+                self._write_error(HTTPStatus.BAD_REQUEST, "INVALID_SYMBOL", str(error))
+            except RuntimeError as error:
+                self._write_error(HTTPStatus.BAD_GATEWAY, "MARKET_INDICATORS_UNAVAILABLE", str(error))
             return
         if path == "/api/backtests":
             self._write_json(HTTPStatus.OK, {"data": self.service.list_reports()})
@@ -45,6 +55,9 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
                 self._write_error(HTTPStatus.NOT_FOUND, "REPORT_NOT_FOUND", "回测报告不存在")
             else:
                 self._write_json(HTTPStatus.OK, report)
+            return
+        if path == "/api/optimizations":
+            self._write_json(HTTPStatus.OK, {"data": self.optimization_manager.list_history()})
             return
         if path.startswith("/api/optimizations/"):
             job_id = path.removeprefix("/api/optimizations/")
