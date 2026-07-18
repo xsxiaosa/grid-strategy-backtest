@@ -4,6 +4,7 @@ import json
 import errno
 import logging
 import mimetypes
+import os
 import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,11 @@ from .storage import JsonStorage
 
 WEB_DIRECTORY = get_web_directory()
 DATA_DIRECTORY = get_data_directory()
+# 本地启动保持仅本机可访问，容器启动通过环境变量覆盖为 0.0.0.0。
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8765
+HOST_ENVIRONMENT_VARIABLE = "GRID_BACKTEST_HOST"
+PORT_ENVIRONMENT_VARIABLE = "GRID_BACKTEST_PORT"
 
 
 class GridBacktestHTTPServer(ThreadingHTTPServer):
@@ -218,7 +224,7 @@ class GridBacktestRequestHandler(BaseHTTPRequestHandler):
         self._write_json(status, {"code": code, "message": message})
 
 
-def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Path | None = None) -> GridBacktestHTTPServer:
+def create_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, data_directory: Path | None = None) -> GridBacktestHTTPServer:
     """创建已注入 JSON 存储和应用服务的线程化 HTTP 服务器。
 
     Args:
@@ -243,16 +249,51 @@ def create_server(host: str = "127.0.0.1", port: int = 8765, data_directory: Pat
     return GridBacktestHTTPServer((host, port), handler_class)
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765) -> int:
+def resolve_runtime_endpoint(host: str | None, port: int | None) -> tuple[str, int]:
+    """<summary>解析本地启动和 Docker 容器启动共用的监听地址与端口。</summary>
+
+    <param name="host">调用方显式指定的监听地址；为空时读取环境变量或使用本机默认值。</param>
+    <param name="port">调用方显式指定的监听端口；为空时读取环境变量或使用默认值。</param>
+    <returns>经过校验的监听地址和 TCP 端口。</returns>
+    <exception cref="ValueError">环境变量中的端口不是 1 到 65535 之间的整数时抛出。</exception>
+
+    容器需要监听 ``0.0.0.0`` 才能被端口映射访问，而桌面本地启动仍应保持
+    ``127.0.0.1`` 默认值，因此把容器差异收敛到两个可选环境变量中。
+    """
+
+    resolved_host = host if host is not None else os.environ.get(HOST_ENVIRONMENT_VARIABLE, DEFAULT_HOST)
+    if not resolved_host:
+        raise ValueError(f"环境变量 {HOST_ENVIRONMENT_VARIABLE} 不能是空值")
+
+    if port is not None:
+        resolved_port = port
+    else:
+        raw_port = os.environ.get(PORT_ENVIRONMENT_VARIABLE)
+        if raw_port is None or not raw_port.strip():
+            resolved_port = DEFAULT_PORT
+        else:
+            try:
+                resolved_port = int(raw_port)
+            except ValueError as error:
+                raise ValueError(f"环境变量 {PORT_ENVIRONMENT_VARIABLE} 必须是整数") from error
+
+    if not 1 <= resolved_port <= 65535:
+        raise ValueError(f"监听端口必须在 1 到 65535 之间：{resolved_port}")
+    return resolved_host, resolved_port
+
+
+def run_server(host: str | None = None, port: int | None = None) -> int:
     """启动独立回测服务并在 Ctrl+C 后安全关闭监听端口。
 
     Args:
-        host: 监听地址，默认只允许本机访问。
-        port: 浏览器和 API 使用的端口。
+        host: 监听地址；未指定时读取 ``GRID_BACKTEST_HOST``，默认只允许本机访问。
+        port: 浏览器和 API 使用的端口；未指定时读取 ``GRID_BACKTEST_PORT``，默认使用 8765。
 
     Returns:
         进程退出码；正常停止返回 0，端口已占用返回 1。
     """
+
+    host, port = resolve_runtime_endpoint(host, port)
 
     # 后台优化运行在线程与进程池中，统一启用带时间和级别的控制台日志便于观察长任务进度。
     logging.basicConfig(

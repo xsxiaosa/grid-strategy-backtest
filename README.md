@@ -39,6 +39,44 @@ python start.py
 - `data/market/{代码}_1m_{天数}d.json`：最近取得的分钟行情缓存。
 - `data/reports/{报告编号}.json`：每次完整回测结果。
 
+## Docker
+
+项目提供 Docker 镜像和 Compose 配置。直接从 GHCR 启动最新镜像：
+
+```text
+docker compose pull
+docker compose up -d --no-build
+```
+
+首次本地构建或修改源码后，可以使用：
+
+```text
+docker compose up -d --build
+```
+
+浏览器访问 `http://服务器IP:8765`。Compose 使用 `grid-backtest-data` 卷保存配置、
+行情缓存、回测报告和优化历史；GitHub Actions 会在 `main`、`master` 推送或 `v*` 标签
+推送时自动构建并发布 `ghcr.io/xsxiaosa/grid-strategy-backtest`。
+
+Compose 同时启动 Watchtower，每 5 分钟检查一次 GHCR。镜像更新后会自动拉取新镜像、
+重建 `grid-backtest` 容器并保留数据卷。服务器首次部署私有 GHCR 镜像前先执行：
+
+```text
+docker login ghcr.io
+docker compose pull
+docker compose up -d --no-build
+```
+
+默认从 `/root/.docker/config.json` 读取 GHCR 登录信息。如果 Docker 使用其他用户登录，
+可以设置 `DOCKER_CONFIG_FILE` 指向对应的 `config.json`。
+
+如果 GHCR 镜像属于其他仓库所有者，可以在 PowerShell 中覆盖镜像地址：
+
+```text
+$env:GRID_BACKTEST_IMAGE = "ghcr.io/你的用户名/grid-strategy-backtest:latest"
+docker compose up -d --no-build
+```
+
 行情请求失败时，如果存在相同证券和周期的缓存，程序会使用缓存并在报告中给出警告。分钟行情来自 Yahoo Finance Chart API，属于非交易所官方数据，只适合策略研究。
 
 ## 测试

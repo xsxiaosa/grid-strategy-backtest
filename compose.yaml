@@ -1,0 +1,55 @@
+services:
+  grid-backtest:
+    # 保留 build 入口，便于本地构建；服务器部署时使用已推送的 GHCR 镜像。
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${GRID_BACKTEST_IMAGE:-ghcr.io/xsxiaosa/grid-strategy-backtest:latest}
+    container_name: grid-strategy-backtest
+    restart: unless-stopped
+    labels:
+      # 只允许 Watchtower 更新这个业务容器，避免误操作服务器上的其他容器。
+      com.centurylinklabs.watchtower.enable: "true"
+    ports:
+      # 暴露给内网访问；生产服务器仍应通过防火墙限制允许访问的网段。
+      - "8765:8765"
+    environment:
+      # 容器内部必须监听所有网卡，宿主机端口映射才能转发到服务。
+      GRID_BACKTEST_HOST: 0.0.0.0
+      GRID_BACKTEST_PORT: "8765"
+    volumes:
+      # 保存配置、行情缓存、回测报告和优化历史，更新镜像时不丢失数据。
+      - grid-backtest-data:/app/data
+    healthcheck:
+      # 使用项目已有的配置接口作为健康检查，不额外依赖 curl 或 wget。
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/config', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  watchtower:
+    # 轮询 GHCR 并在镜像 digest 变化后自动替换业务容器。
+    image: containrrr/watchtower:latest
+    container_name: grid-backtest-watchtower
+    restart: unless-stopped
+    environment:
+      # 每 300 秒检查一次，发现新镜像后自动清理旧镜像并重启业务容器。
+      WATCHTOWER_POLL_INTERVAL: "300"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
+      TZ: Asia/Shanghai
+    volumes:
+      # Watchtower 需要 Docker Socket 管理被监控容器的生命周期。
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 私有 GHCR 登录凭据默认来自 root 用户的 Docker 配置，可通过环境变量覆盖宿主机路径。
+      - ${DOCKER_CONFIG_FILE:-/root/.docker/config.json}:/config.json:ro
+    depends_on:
+      # 等待业务容器创建后再启动监控容器。
+      grid-backtest:
+        condition: service_started
+
+volumes:
+  # 命名卷跨容器更新保留所有运行数据。
+  grid-backtest-data:

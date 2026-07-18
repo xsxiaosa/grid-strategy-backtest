@@ -1,0 +1,23 @@
+# Python 缓存和本地虚拟环境不应进入镜像构建上下文。
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmppytest-*/
+.venv/
+venv/
+
+# 运行期间生成的数据必须通过 Docker volume 持久化，不能固化进镜像。
+data/
+
+# 测试、桌面发布产物和 Git 元数据不参与服务镜像构建。
+tests/
+dist-package/
+artifacts/
+.git/
+.github/
+.agents/
+
+# 本地工具生成的日志和临时文件不应进入构建上下文。
+*.log
+Thumbs.db
+.DS_Store
