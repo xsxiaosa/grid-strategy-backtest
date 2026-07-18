@@ -10,6 +10,8 @@ services:
     labels:
       # 只允许 Watchtower 更新这个业务容器，避免误操作服务器上的其他容器。
       com.centurylinklabs.watchtower.enable: "true"
+      # 将业务容器归入当前项目的 Watchtower 监控范围。
+      com.centurylinklabs.watchtower.scope: grid-backtest
     ports:
       # 暴露给内网访问；生产服务器仍应通过防火墙限制允许访问的网段。
       - "8765:8765"
@@ -38,8 +40,13 @@ services:
       WATCHTOWER_POLL_INTERVAL: "300"
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_LABEL_ENABLE: "true"
+      # 只更新带有相同 scope 标签的容器，并避免与其他 Watchtower 实例互相清理。
+      WATCHTOWER_SCOPE: grid-backtest
       WATCHTOWER_NO_STARTUP_MESSAGE: "true"
       TZ: Asia/Shanghai
+    labels:
+      # Watchtower 自身也加入同一 scope，支持同一主机上运行多个独立实例。
+      com.centurylinklabs.watchtower.scope: grid-backtest
     volumes:
       # Watchtower 需要 Docker Socket 管理被监控容器的生命周期。
       - /var/run/docker.sock:/var/run/docker.sock
