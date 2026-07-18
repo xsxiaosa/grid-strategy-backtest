@@ -76,6 +76,7 @@ jobs:
           path: release-assets
           pattern: grid-strategy-backtest-*
           merge-multiple: true
+          skip-decompress: true
 
       # 使用 GitHub CLI 将五个平台文件直接挂到当前 Tag 的 Release Assets。
       - name: 创建 Release 并上传发布文件
