@@ -11,7 +11,7 @@ from itertools import product
 from pathlib import Path
 from typing import Any, Iterable
 
-from grid_backtest.runtime_paths import get_data_directory
+from grid_backtest.runtime_paths import configure_output_encoding, get_data_directory
 
 
 # 默认搜索范围刻意保持在可解释的规模内，完整组合数为 1764 组。
@@ -362,6 +362,7 @@ def main() -> int:
         正常完成时返回进程退出码 0。
     """
 
+    configure_output_encoding()
     parser = create_argument_parser()
     args = parser.parse_args()
     if args.top <= 0:
